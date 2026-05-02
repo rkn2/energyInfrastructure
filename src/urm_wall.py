@@ -1,18 +1,32 @@
 """
-URM wall panel geometry and material properties for thermal power plant buildings.
-Archetypes: boiler house, turbine hall, powerhouse (1890-1950 era construction).
+URM wall panel geometry and material properties for pre-1950 industrial buildings.
+
+Archetypes represent the three dominant structural configurations found in pre-1950
+URM industrial campuses (heavy industrial, large-span production hall, multi-story
+complex). Geometry and material parameters are derived from survey data on U.S. thermal
+generation fleet buildings — the best-documented pre-1950 industrial URM dataset
+available — but the structural behavior is representative of any heavy manufacturing
+facility of the era (foundries, mills, chemical plants, fabrication shops).
+
+NOTE FOR STEAM PLANT VARIANT (future DOE CESER / GMI application):
+  - Restore archetype labels to 'Boiler House (1895-1915)', 'Turbine Hall (1920-1940)',
+    'Powerhouse (1910-1930)' and update consequence model to use MWh / wholesale rate.
+  - See admin/grants/ for CESER and GMI concept paper templates.
+
 All units: inches/psi for material props; feet/lbf for structural calculations.
 """
 import numpy as np
 
 
 # ── Archetype definitions ──────────────────────────────────────────────────────
-# Three representative building types from U.S. thermal generation fleet.
-# Parameters: mean values for Monte Carlo sampling.
+# Three representative pre-1950 URM industrial building configurations.
+# Internal keys retain thermal-plant names (boiler_house, turbine_hall, powerhouse)
+# for code stability; display labels are generic manufacturing terms.
+# STEAM PLANT VARIANT: swap labels back to 'Boiler House', 'Turbine Hall', 'Powerhouse'.
 
 ARCHETYPES = {
     "boiler_house": {
-        "label": "Boiler House\n(1895–1915)",
+        "label": "Heavy Industrial\n(1895–1915)",
         "thickness_in_mean": 24.0,   # 6-wythe solid brick
         "thickness_in_std": 2.0,
         "height_ft_mean": 30.0,      # total building wall height ~28-32 ft
@@ -36,7 +50,7 @@ ARCHETYPES = {
         "unit_weight_pcf": 120.0,
     },
     "turbine_hall": {
-        "label": "Turbine Hall\n(1920–1940)",
+        "label": "Large Production Hall\n(1920–1940)",
         "thickness_in_mean": 16.0,   # 4-wythe
         "thickness_in_std": 1.5,
         "height_ft_mean": 45.0,      # total height — open to roof, no intermediate floors
@@ -58,7 +72,7 @@ ARCHETYPES = {
         "unit_weight_pcf": 120.0,
     },
     "powerhouse": {
-        "label": "Powerhouse\n(1910–1930)",
+        "label": "Multi-story Industrial\n(1910–1930)",
         "thickness_in_mean": 20.0,   # 5-wythe
         "thickness_in_std": 2.0,
         "height_ft_mean": 36.0,

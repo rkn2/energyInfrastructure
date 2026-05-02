@@ -1,6 +1,15 @@
 """
-Site-specific hazard analysis: Victor J. Daniel Jr. Power Plant vicinity.
-Location: Gulfport, MS (~30.35°N, 88.87°W) — Harrison County coast.
+Site-specific hazard analysis: illustrative Gulf Coast industrial site.
+Reference location: Plant Daniel vicinity, Escatawpa MS (~30.40°N, 88.47°W),
+Jackson County — used here as a well-documented Gulf Coast industrial site with
+publicly available ASCE 7-22 wind and FEMA FIRM flood data.
+
+For the AMMTO HPC4EI concept paper this is a demonstration/validation site.
+Replace with the SMM's actual facility coordinates for the full application.
+
+NOTE FOR STEAM PLANT VARIANT (DOE CESER / GMI): restore SITE_NAME to
+"Victor J. Daniel Jr. Power Plant vicinity" and frame as the specific facility
+under study rather than an illustrative example.
 
 Replaces generic ASCE 7-22 return-period tables with site-specific values
 and compares resulting AFP against the generic-table baseline.
@@ -27,8 +36,8 @@ from fragility import (
 from scipy.interpolate import interp1d
 
 # ── Site identity ──────────────────────────────────────────────────────────────
-SITE_NAME = "Victor J. Daniel Jr. Power Plant vicinity"
-SITE_CITY = "Gulfport, MS"
+SITE_NAME = "Gulf Coast Industrial Site (illustrative; Plant Daniel vicinity)"
+SITE_CITY = "Escatawpa, MS"
 SITE_LAT  = 30.35
 SITE_LON  = -88.87
 

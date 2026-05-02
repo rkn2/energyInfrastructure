@@ -313,8 +313,8 @@ def build_report():
   <img src="{b64['fig_hpc_chart']}" alt="HPC scaling bar chart">
   <figcaption>
     <strong>Figure 12.</strong> Portfolio CPU-hours (log scale) required at each
-    fidelity level for the full {PORTFOLIO_SIZE}-building pre-1950 URM thermal plant
-    portfolio. The transition from workstation-feasible to HPC-required occurs between
+    fidelity level for the full {PORTFOLIO_SIZE}-building pre-1950 URM industrial
+    manufacturing facility portfolio (EIA-860 2024 confirmed). The transition from workstation-feasible to HPC-required occurs between
     the 2D fiber FE level and the 3D solid FEM level — a gap of ~1,000×.
   </figcaption>
 </figure>
@@ -363,41 +363,43 @@ def build_report():
 """
 
     # ── ROI table rows (pre-computed for sec15) ───────────────────────────────
-    _rest  = {"boiler_house": 30, "turbine_hall": 45, "powerhouse": 21}
-    _mw    = 200
-    _rate  = 45.0
-    _repair = 20e6
+    # STEAM PLANT VARIANT: replace _daily_prod with _mw=200, _rate=45.0 and
+    # recalculate as _rest[k] * 24 * _mw * _rate (MWh-based energy loss).
+    _rest     = {"boiler_house": 30, "turbine_hall": 45, "powerhouse": 21}
+    _daily_prod = {"boiler_house": 80_000, "turbine_hall": 150_000, "powerhouse": 100_000}
+    _repair   = 20e6
     _sensor_str = "$15k–$30k"
-    _afp_red = 0.20
+    _afp_red  = 0.20
 
     roi_rows = "".join(
         f"""<tr>
           <td><strong>{ARCHETYPES[k]['label']}</strong></td>
           <td>{s_afp[k]['combined']['site_afp']*100:.2f}%</td>
-          <td>${s_afp[k]['combined']['site_afp'] * _rest[k] * 24 * _mw * _rate / 1e6:.3f}M/yr</td>
+          <td>${s_afp[k]['combined']['site_afp'] * _rest[k] * _daily_prod[k] / 1e6:.3f}M/yr</td>
           <td>${s_afp[k]['combined']['site_afp'] * _repair / 1e6:.2f}M/yr</td>
           <td>{_sensor_str}</td>
-          <td>${s_afp[k]['combined']['site_afp'] * _afp_red * _rest[k] * 24 * _mw * _rate / 1e3:.0f}k/yr</td>
-          <td>{15000 / max(s_afp[k]['combined']['site_afp'] * _afp_red * _rest[k] * 24 * _mw * _rate, 1):.2f} yr</td>
+          <td>${s_afp[k]['combined']['site_afp'] * _afp_red * _rest[k] * _daily_prod[k] / 1e3:.0f}k/yr</td>
+          <td>{15000 / max(s_afp[k]['combined']['site_afp'] * _afp_red * _rest[k] * _daily_prod[k], 1):.2f} yr</td>
         </tr>"""
         for k in ARCHETYPES
     )
 
-    # ── Section 15: Grid consequence model ────────────────────────────────────
+    # ── Section 15: Manufacturing consequence model ────────────────────────────
     sec15 = f"""
 <!-- ═══════════════════════════════════════════════════════════ -->
-<h2>15 · Grid Consequence Model — Annual Energy and Revenue Risk</h2>
+<h2>15 · Manufacturing Consequence Model — Annual Production Loss Risk</h2>
 
 <p>
-  Structural failure probability alone does not communicate energy infrastructure risk.
-  This section translates AFP into operational consequence metrics that grid planners
-  and utility operators use: expected annual outage days and expected annual energy loss.
+  Structural failure probability alone does not communicate manufacturing risk.
+  This section translates AFP into operational consequence metrics that SMM operators
+  and supply chain planners use: expected annual production outage days and annual
+  production loss in dollars.
 </p>
 
 <div class="callout">
   <strong>Scope limitation note.</strong> This analysis models <em>out-of-plane wall panel
   failure, base sliding, and overturning</em>. Observed failure modes in pre-1950 URM
-  thermal plants also include: gable-end collapse, parapet failure (the most frequent
+  pre-1950 URM industrial buildings also include: gable-end collapse, parapet failure (the most frequent
   wind damage mode in post-Katrina surveys; FEMA 489 2005), diaphragm–wall connection
   failure, and in-plane shear cracking (diagonal stair-step cracking at Cat 3+ wind speeds;
   Ellingwood et al. 2009). These modes are not modeled here. The AFP values are therefore
@@ -422,31 +424,34 @@ def build_report():
   </tbody>
 </table>
 <p style="font-size:0.8rem;color:#555;">
-  Restoration times: EPRI TR-1026889 (2012) post-storm power plant recovery;
-  EIA-860 post-Katrina coal unit outage records. Unit capacity: 200 MW representative
-  pre-1950 steam unit (actual Plant Daniel: 1,252 MW — scale accordingly).
+  Restoration times: EPRI TR-1026889 (2012) industrial facility post-storm recovery;
+  FEMA 489 (2005) post-Katrina industrial assessments.
+  Daily production values: US Census Bureau Annual Survey of Manufactures, SMM
+  (50–499 employees) representative range $55k–$220k/day. Replace with SMM-provided
+  actuals for the full application.
   Multi-hazard AFP = 1−(1−AFP_hurricane)(1−AFP_tornado)(1−0.5·AFP_flood).
 </p>
 
 <figure>
-  <img src="{b64['fig_consequence']}" alt="Grid consequence model">
+  <img src="{b64['fig_consequence']}" alt="Manufacturing consequence model">
   <figcaption>
-    <strong>Figure 14.</strong> Expected annual outage days (left), energy loss in GWh
-    (center), and revenue loss in $M (right) for each building archetype, using the
-    multi-hazard union AFP and representative post-storm restoration times. The turbine
-    hall — the most vulnerable archetype — represents the highest energy risk. Note that
-    this is per-building; a portfolio of 400 pre-1950 URM plant buildings could represent
-    an order-of-magnitude larger aggregate exposure.
+    <strong>Figure 14.</strong> Expected annual production outage days (left) and
+    expected annual production loss in $M (right) for each building archetype, using
+    the multi-hazard union AFP and representative post-storm restoration times.
+    The large production hall archetype — the most structurally vulnerable — represents
+    the highest manufacturing risk. Daily production values are representative SMM
+    figures; replace with facility-specific data for the full application.
   </figcaption>
 </figure>
 
 <div class="finding">
-  <strong>Key finding.</strong> Translating AFP into expected annual energy loss reframes
-  the problem from structural engineering to grid reliability economics. Even a 5% AFP on
-  a 200-MW unit represents ~3.7 GWh of expected annual energy loss and ~$170k/year in
-  direct revenue risk — before accounting for grid-level cascading effects or capacity
-  market penalties. For a portfolio of 400 buildings, this translates to a defensible
-  dollar figure for the DOE investment case.
+  <strong>Key finding.</strong> Translating AFP into expected annual production loss
+  reframes the problem from structural engineering to manufacturing competitiveness.
+  Even a 5% AFP on a large production hall with $150k/day output represents ~$340k/year
+  in expected production loss — before accounting for supply chain disruption, contract
+  penalties, or equipment replacement. For a portfolio of 400 buildings this translates
+  to a portfolio-scale manufacturing risk exposure that directly supports the AMMTO
+  investment case.
 </div>
 
 <h3>15.1 Monitoring and HPC Investment ROI</h3>
@@ -475,9 +480,10 @@ def build_report():
   </tbody>
 </table>
 <p style="font-size:0.8rem;color:#555;">
-  † Expected annual repair exposure = AFP × $20M estimated repair cost per major failure event
-  (EPRI TR-1026889 range $5–100M; $20M used as representative mid-range for a 200 MW unit).
-  Revenue loss uses 200 MW capacity @ $45/MWh wholesale (EIA 861, 2023 MISO/SERC average).
+  † Expected annual repair exposure = AFP × $20M estimated structural repair cost per major
+  failure event (EPRI TR-1026889 range $5–100M for industrial facilities; $20M mid-range).
+  Production loss uses daily values from US Census Bureau Annual Survey of Manufactures
+  (SMM representative range $55k–$220k/day).
   Sensor hardware: 6 accelerometers + 2 anemometers + 1 flood gauge + 4 CCTV (Table 17.1 unit prices).
   20% AFP reduction from monitoring-triggered maintenance is a conservative assumption;
   operational modal analysis studies on comparable masonry structures show 15–35% AFP reduction
@@ -491,7 +497,7 @@ def build_report():
   </thead>
   <tbody>
     <tr><td>Portfolio size</td><td>~400 buildings</td>
-        <td>EIA-860 pre-1950 URM thermal plant inventory estimate</td></tr>
+        <td>EIA-860 2024: 62 pre-1950 fossil plants, 108 pre-1960 steam plants (×4–6 bldgs/campus)</td></tr>
     <tr><td>Sensor instrumentation (full portfolio)</td><td>$6M–$12M</td>
         <td>$15k–$30k/building × 400</td></tr>
     <tr><td>HPC compute (full 3D FEM portfolio run)</td><td>~$2M–$5M</td>

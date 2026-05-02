@@ -1,5 +1,6 @@
 """
-Fragility curve generation for URM thermal plant building wall assemblies.
+Fragility curve generation for pre-1950 URM industrial building wall assemblies.
+# STEAM PLANT VARIANT: no code changes needed here; labels come from urm_wall.py.
 Uses vectorized Monte Carlo with independent parameter sampling.
 
 Hazards:
