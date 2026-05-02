@@ -800,6 +800,16 @@ def build_report():
             new_refs + "\n  <li>Cundall, P. A.",
         )
 
+    # AMMTO reframe: update abstract from thermal-plant to industrial-manufacturing language
+    html = html.replace(
+        "unreinforced masonry (URM) wall panels in legacy\n  U.S. thermal power plant buildings.",
+        "unreinforced masonry (URM) wall panels in legacy\n  U.S. pre-1950 industrial manufacturing buildings.",
+    )
+    html = html.replace(
+        "many legacy thermal generation\n  facilities face",
+        "many legacy pre-1950 URM industrial manufacturing\n  facilities face",
+    )
+
     # Update footer date
     html = html.replace("Generated 2026-05-02", "Generated 2026-05-02 (Phase 3 update)")
 
