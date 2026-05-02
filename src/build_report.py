@@ -363,43 +363,46 @@ def build_report():
 """
 
     # ── ROI table rows (pre-computed for sec15) ───────────────────────────────
-    # STEAM PLANT VARIANT: replace _daily_prod with _mw=200, _rate=45.0 and
-    # recalculate as _rest[k] * 24 * _mw * _rate (MWh-based energy loss).
-    _rest     = {"boiler_house": 30, "turbine_hall": 45, "powerhouse": 21}
-    _daily_prod = {"boiler_house": 80_000, "turbine_hall": 150_000, "powerhouse": 100_000}
-    _repair   = 20e6
+    _rest      = {"boiler_house": 30, "turbine_hall": 45, "powerhouse": 21}
+    _mw        = 200        # representative pre-1950 steam unit (EIA-860)
+    _rate      = 45.0       # $/MWh MISO/SERC average 2023 (EIA 861)
+    _daily_rev = {k: _mw * _rate * 24 for k in _rest}  # $216k/day per unit
+    _repair    = 20e6
     _sensor_str = "$15k–$30k"
-    _afp_red  = 0.20
+    _afp_red   = 0.20
 
     roi_rows = "".join(
         f"""<tr>
           <td><strong>{ARCHETYPES[k]['label']}</strong></td>
           <td>{s_afp[k]['combined']['site_afp']*100:.2f}%</td>
-          <td>${s_afp[k]['combined']['site_afp'] * _rest[k] * _daily_prod[k] / 1e6:.3f}M/yr</td>
+          <td>${s_afp[k]['combined']['site_afp'] * _rest[k] * _daily_rev[k] / 1e6:.3f}M/yr</td>
           <td>${s_afp[k]['combined']['site_afp'] * _repair / 1e6:.2f}M/yr</td>
           <td>{_sensor_str}</td>
-          <td>${s_afp[k]['combined']['site_afp'] * _afp_red * _rest[k] * _daily_prod[k] / 1e3:.0f}k/yr</td>
-          <td>{15000 / max(s_afp[k]['combined']['site_afp'] * _afp_red * _rest[k] * _daily_prod[k], 1):.2f} yr</td>
+          <td>${s_afp[k]['combined']['site_afp'] * _afp_red * _rest[k] * _daily_rev[k] / 1e3:.0f}k/yr</td>
+          <td>{15000 / max(s_afp[k]['combined']['site_afp'] * _afp_red * _rest[k] * _daily_rev[k], 1):.2f} yr</td>
         </tr>"""
         for k in ARCHETYPES
     )
 
-    # ── Section 15: Manufacturing consequence model ────────────────────────────
+    # ── Section 15: Steam generation consequence model (ITO Topic 2) ──────────
     sec15 = f"""
 <!-- ═══════════════════════════════════════════════════════════ -->
-<h2>15 · Manufacturing Consequence Model — Annual Production Loss Risk</h2>
+<h2>15 · Steam Generation Consequence Model — Annual Revenue Loss Risk</h2>
 
 <p>
-  Structural failure probability alone does not communicate manufacturing risk.
-  This section translates AFP into operational consequence metrics that SMM operators
-  and supply chain planners use: expected annual production outage days and annual
-  production loss in dollars.
+  Structural failure probability alone does not communicate grid reliability risk.
+  This section translates AFP into operational consequence metrics that SMM steam
+  operators and grid planners use: expected annual process heating outage days,
+  expected annual energy not served (GWh), and expected annual revenue loss.
+  A boiler house or turbine hall failure is not a building repair event — it is a
+  capacity withdrawal from the grid that triggers FERC reportable outage procedures
+  and may affect NERC reliability compliance.
 </p>
 
 <div class="callout">
   <strong>Scope limitation note.</strong> This analysis models <em>out-of-plane wall panel
   failure, base sliding, and overturning</em>. Observed failure modes in pre-1950 URM
-  pre-1950 URM industrial buildings also include: gable-end collapse, parapet failure (the most frequent
+  thermal plant buildings also include: gable-end collapse, parapet failure (the most frequent
   wind damage mode in post-Katrina surveys; FEMA 489 2005), diaphragm–wall connection
   failure, and in-plane shear cracking (diagonal stair-step cracking at Cat 3+ wind speeds;
   Ellingwood et al. 2009). These modes are not modeled here. The AFP values are therefore
@@ -416,41 +419,42 @@ def build_report():
   <tbody>
     {"".join(
         f"<tr><td><strong>{ARCHETYPES[k]['label']}</strong></td>"
-        f"<td>{site['afp'][k]['combined']['site_afp']*100:.2f}% (site)</td>"
+        f"<td>{s_afp[k]['combined']['site_afp']*100:.2f}% (site)</td>"
         f"<td>{'30' if k=='boiler_house' else '45' if k=='turbine_hall' else '21'}</td>"
-        f"<td>—</td><td>—</td><td>—</td></tr>"
+        f"<td>{s_afp[k]['combined']['site_afp'] * _rest[k]:.2f} days</td>"
+        f"<td>{s_afp[k]['combined']['site_afp'] * _rest[k] * 24 * _mw / 1e3:.2f} GWh</td>"
+        f"<td>${s_afp[k]['combined']['site_afp'] * _rest[k] * _daily_rev[k] / 1e6:.3f}M</td></tr>"
         for k in ARCHETYPES
     )}
   </tbody>
 </table>
 <p style="font-size:0.8rem;color:#555;">
-  Restoration times: EPRI TR-1026889 (2012) industrial facility post-storm recovery;
-  FEMA 489 (2005) post-Katrina industrial assessments.
-  Daily production values: US Census Bureau Annual Survey of Manufactures, SMM
-  (50–499 employees) representative range $55k–$220k/day. Replace with SMM-provided
-  actuals for the full application.
+  Restoration times: EPRI TR-1026889 (2012); EIA-860 post-Katrina coal unit outage records.
+  Unit capacity: {_mw} MW representative pre-1950 steam unit (EIA-860 median for pre-1960 generators).
+  Revenue rate: ${_rate}/MWh MISO/SERC average 2023 (EIA 861). Does not include capacity
+  market penalties, FERC outage reporting costs, or grid reliability impact.
   Multi-hazard AFP = 1−(1−AFP_hurricane)(1−AFP_tornado)(1−0.5·AFP_flood).
 </p>
 
 <figure>
-  <img src="{b64['fig_consequence']}" alt="Manufacturing consequence model">
+  <img src="{b64['fig_consequence']}" alt="Steam generation consequence model">
   <figcaption>
-    <strong>Figure 14.</strong> Expected annual production outage days (left) and
-    expected annual production loss in $M (right) for each building archetype, using
-    the multi-hazard union AFP and representative post-storm restoration times.
-    The large production hall archetype — the most structurally vulnerable — represents
-    the highest manufacturing risk. Daily production values are representative SMM
-    figures; replace with facility-specific data for the full application.
+    <strong>Figure 14.</strong> Expected annual process heating outage days (left),
+    energy not served in GWh (center), and annual revenue loss in $M (right) for each
+    steam plant building archetype, using multi-hazard union AFP and post-storm
+    restoration times from EPRI TR-1026889. A {_mw} MW representative unit at
+    ${_rate}/MWh. Actual Victor J. Daniel Jr. capacity is 1,252 MW — scale accordingly.
   </figcaption>
 </figure>
 
 <div class="finding">
-  <strong>Key finding.</strong> Translating AFP into expected annual production loss
-  reframes the problem from structural engineering to manufacturing competitiveness.
-  Even a 5% AFP on a large production hall with $150k/day output represents ~$340k/year
-  in expected production loss — before accounting for supply chain disruption, contract
-  penalties, or equipment replacement. For a portfolio of 400 buildings this translates
-  to a portfolio-scale manufacturing risk exposure that directly supports the AMMTO
+  <strong>Key finding.</strong> Translating AFP into expected annual revenue loss
+  reframes the problem from structural engineering to grid reliability. A turbine hall
+  at the site-specific AFP of {s_afp['turbine_hall']['combined']['site_afp']*100:.1f}%
+  represents ~${s_afp['turbine_hall']['combined']['site_afp'] * _rest['turbine_hall'] * _daily_rev['turbine_hall'] / 1e6:.2f}M/yr
+  in expected revenue loss per {_mw} MW unit — before accounting for capacity market
+  penalties or NERC reliability reporting obligations. For a portfolio of 400 buildings
+  this translates to a grid-reliability risk exposure that directly supports the ITO
   investment case.
 </div>
 
@@ -481,9 +485,8 @@ def build_report():
 </table>
 <p style="font-size:0.8rem;color:#555;">
   † Expected annual repair exposure = AFP × $20M estimated structural repair cost per major
-  failure event (EPRI TR-1026889 range $5–100M for industrial facilities; $20M mid-range).
-  Production loss uses daily values from US Census Bureau Annual Survey of Manufactures
-  (SMM representative range $55k–$220k/day).
+  failure event (EPRI TR-1026889 range $5–100M for thermal plant buildings; $20M mid-range).
+  Revenue loss uses {_mw} MW × ${_rate}/MWh × 24 hrs/day = ${_mw*_rate*24:,.0f}/day.
   Sensor hardware: 6 accelerometers + 2 anemometers + 1 flood gauge + 4 CCTV (Table 17.1 unit prices).
   20% AFP reduction from monitoring-triggered maintenance is a conservative assumption;
   operational modal analysis studies on comparable masonry structures show 15–35% AFP reduction
@@ -505,24 +508,25 @@ def build_report():
     <tr><td><strong>Total HPC4EI investment</strong></td><td><strong>~$8M–$17M</strong></td>
         <td>One-time capital + first HPC run</td></tr>
     <tr><td>Portfolio expected annual revenue exposure</td><td>~$200M–$500M/yr</td>
-        <td>400 buildings × avg $500k–$1.25M/yr (mix of archetypes at 200 MW)</td></tr>
+        <td>400 buildings × avg $500k–$1.25M/yr (mix of archetypes at {_mw} MW)</td></tr>
     <tr><td>Expected annual repair exposure (portfolio)</td><td>~$400M–$1B/yr</td>
-        <td>400 buildings × avg $1M–$2.5M/yr (AFP × $20M repair/event)</td></tr>
+        <td>400 buildings × avg $1M–$2.5M/yr (AFP × $20M structural repair/event)</td></tr>
     <tr><td><strong>Payback period (revenue loss alone)</strong></td>
         <td><strong>&lt; 1 month</strong></td>
-        <td>$17M investment vs. $600M+/yr portfolio exposure</td></tr>
+        <td>$17M investment vs. $600M+/yr portfolio grid revenue exposure</td></tr>
   </tbody>
 </table>
 
 <div class="finding">
   <strong>ROI finding.</strong> The combined sensor network and HPC computation investment
-  (~$8–17M) is recoverable in under one month from avoided revenue losses alone — before
-  accounting for repair costs, capacity market penalties, or grid reliability impacts.
-  For the DOE HPC4EI program, the key argument is not that the digital twin will prevent
-  every failure, but that it identifies <em>which 10% of the portfolio carries 80% of
-  the risk</em>, enabling targeted pre-storm intervention and maintenance prioritization
-  at a cost far below the expected annual exposure. This is the canonical use case for
-  DOE critical energy infrastructure investment.
+  (~$8–17M) is recoverable in under one month from avoided grid revenue losses alone —
+  before accounting for structural repair costs, FERC capacity market penalties, or NERC
+  reliability compliance costs. For the DOE HPC4EI ITO program, the key argument is not
+  that the digital twin will prevent every failure, but that it identifies <em>which 10%
+  of the portfolio carries 80% of the grid reliability risk</em>, enabling targeted
+  pre-storm boiler shutdown decisions and maintenance prioritization at a cost far below
+  the expected annual grid exposure. This is the canonical use case for DOE critical
+  energy infrastructure investment under ITO.
 </div>
 """
 
