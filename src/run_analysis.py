@@ -324,7 +324,8 @@ def plot_risk_matrix(results: dict):
     cbar.set_label("Annual Failure Probability (%)", fontsize=9)
 
     fig.text(0.01, -0.06,
-             "PEER PBEE integration: λ_f = Σ P(fail|IM) · Δλ(IM). "
+             "Annual failure probability via hazard-fragility convolution: λ_f = Σ P(fail|IM) · Δλ(IM) "
+             "(Cornell & Krawinkler 2000; Kennedy & Short 1994). "
              "Wind: ASCE 7-22 Risk Cat II hazard curve (10-yr to 1700-yr return periods). "
              "Flood: FEMA Zone AE depths (conditional on site being in floodplain). "
              "Tornado: Tippett et al. (2016) SE US rates scaled to ~0.2 km² plant footprint. "

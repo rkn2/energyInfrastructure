@@ -162,7 +162,8 @@ def run_all_fragility() -> dict:
 
 def annual_failure_probability(fragility_interp, hazard_table: dict) -> float:
     """
-    Annual failure probability via PEER PBEE numerical integration:
+    Annual failure probability via hazard-fragility convolution
+    (Kennedy & Short 1994; Cornell & Krawinkler 2000):
         λ_f = Σᵢ P(fail | IMᵢ) × Δλᵢ
     where Δλᵢ = λ(IMᵢ₋₁) - λ(IMᵢ) is the annual rate of occurrence in bin i.
     fragility_interp: callable P(failure | intensity)
