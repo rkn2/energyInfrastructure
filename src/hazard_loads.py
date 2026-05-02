@@ -9,24 +9,37 @@ import numpy as np
 # ── Wind ──────────────────────────────────────────────────────────────────────
 
 def velocity_pressure_psf(V_mph: float,
-                           Kz: float = 0.85,   # exposure cat C, z~30 ft
+                           Kz: float = 0.98,   # Exposure C, z≈30 ft; use kz_exposure_c() for height-specific
                            Kzt: float = 1.0,
-                           Kd: float = 0.85) -> float:
+                           Kd: float = 1.0) -> float:    # C&C wall panels: Kd=1.0 per ASCE 7-22 §26.6.1 Table 26.6-1
     """
     Velocity pressure per ASCE 7-22 Eq. 26.10-1:
         qz = 0.00256 · Kz · Kzt · Kd · V²   (psf)
+    Kd = 1.0 for Components & Cladding (wall panels); MWFRS uses 0.85.
     """
     return 0.00256 * Kz * Kzt * Kd * V_mph**2
 
 
+def kz_exposure_c(z_ft: float) -> float:
+    """
+    Velocity pressure exposure coefficient Kz for Exposure Category C.
+    ASCE 7-22 Table 26.10-1 / Eq. 26.10-1:
+        Kz = 2.01 · (z/zg)^(2/α)   where α = 9.5, zg = 900 ft
+    Clipped to z ≥ 15 ft (code minimum reference height).
+    """
+    z = max(float(z_ft), 15.0)
+    return 2.01 * (z / 900.0) ** (2.0 / 9.5)
+
+
 def wind_pressure_psf(V_mph: float | np.ndarray,
                        Cp_windward: float = 0.8,
-                       Cp_leeward: float = 0.5) -> float | np.ndarray:
+                       Cp_leeward: float = 0.5,
+                       Kz: float = 0.98) -> float | np.ndarray:
     """
     Net out-of-plane wall pressure (windward + leeward contribution).
     p_net = qz · (Cp_windward + Cp_leeward)  — conservative for enclosed industrial bldg.
     """
-    qz = velocity_pressure_psf(V_mph)
+    qz = velocity_pressure_psf(V_mph, Kz=Kz)
     return qz * (Cp_windward + Cp_leeward)
 
 
@@ -47,17 +60,18 @@ EF_MID_SPEEDS = np.array([
 ])
 
 
-def tornado_pressure_psf(EF_speed_mph: float | np.ndarray) -> float | np.ndarray:
+def tornado_pressure_psf(EF_speed_mph: float | np.ndarray,
+                          Kz: float = 0.98) -> float | np.ndarray:
     """
     Apply an internal pressure amplification factor of 1.5× for tornado
     (ASCE 7-22 App. CC §CC.5: breaching of envelope creates +/- internal pressure).
     """
-    return wind_pressure_psf(EF_speed_mph) * 1.5
+    return wind_pressure_psf(EF_speed_mph, Kz=Kz) * 1.5
 
 
 # ── Flood ─────────────────────────────────────────────────────────────────────
 
-WATER_DENSITY_PCF = 64.0      # saltwater ≈ 64.0, freshwater ≈ 62.4
+WATER_DENSITY_PCF = 62.4      # freshwater; most thermal plants are riverine, not coastal
 FLOOD_Cd = 2.0                # drag coefficient for flat wall, FEMA P-55 §3.4.2
 
 
@@ -113,12 +127,13 @@ def flood_total_force(depth_ft: float | np.ndarray,
 def hurricane_landfall_forces(V_wind_mph: float | np.ndarray,
                                storm_surge_ft: float | np.ndarray,
                                V_water_fps: float = 8.0,
-                               width_ft: float = 20.0) -> dict:
+                               width_ft: float = 20.0,
+                               Kz: float = 0.98) -> dict:
     """
     Simultaneous wind and storm-surge flood loading during hurricane landfall.
     Returns a dict of load components.
     """
-    p_wind = wind_pressure_psf(V_wind_mph)
+    p_wind = wind_pressure_psf(V_wind_mph, Kz=Kz)
     F_flood, arm_flood, p_flood_eff = flood_total_force(storm_surge_ft, V_water_fps, width_ft)
 
     return {

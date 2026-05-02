@@ -273,11 +273,14 @@ def plot_risk_matrix(results: dict):
         afp[i, 0] = annual_failure_probability(interp_h, RETURN_PERIOD_WIND) * 100
 
         # Tornado: P(fail | EF) × annual rate per EF category.
-        # Rates from Tippett et al. (2016) SPC tornado climatology for SE US
-        # high-exposure region (roughly AL/MS/TN corridor). Values are per
-        # grid cell (~1000 km²) per year; treat as site-scale approximation.
+        # Per-site annual rates for a ~0.2 km² industrial facility footprint in a
+        # high-hazard SE US location (Dixie Alley / Gulf Coast), derived by scaling
+        # Tippett et al. (2016) SPC tornado climatology (1° × 1° grid cells,
+        # ~10,000 km²) by the plant-to-cell area ratio (~0.2/10,000 = 2×10⁻⁵).
+        # EF2+ combined rate ≈ 3×10⁻⁴/yr → ~3,300-yr return period, consistent
+        # with ASCE 7-22 App. CC tornado maps for Risk Category II in this region.
         r_t = results[key]["tornado"]
-        ef_annual_rates = np.array([0.010, 0.005, 0.002, 0.0005, 0.0001, 0.00002])
+        ef_annual_rates = np.array([5.0e-4, 1.5e-4, 3.0e-5, 5.0e-6, 6.0e-7, 5.0e-8])
         afp[i, 1] = float(np.sum(r_t["p_fail"] * ef_annual_rates)) * 100
 
         # Flood: integrate over return-period depths (100-yr base)
@@ -324,7 +327,7 @@ def plot_risk_matrix(results: dict):
              "PEER PBEE integration: λ_f = Σ P(fail|IM) · Δλ(IM). "
              "Wind: ASCE 7-22 Risk Cat II hazard curve (10-yr to 1700-yr return periods). "
              "Flood: FEMA Zone AE depths (conditional on site being in floodplain). "
-             "Tornado: Tippett et al. (2016) SE US rates. "
+             "Tornado: Tippett et al. (2016) SE US rates scaled to ~0.2 km² plant footprint. "
              "Reference: ASCE 7-22 Risk Cat II design wind → 700-yr RP (0.14%/yr exceedance probability); "
              "these archetypes reach >50% panel failure well below the 700-yr wind speed.",
              fontsize=7.5, color="#555", wrap=True)
@@ -343,7 +346,7 @@ def plot_degradation_sensitivity():
     of construction year (1895–1950) — key argument for why aging plants face
     invisibly elevated risk that is invisible to current inspection practice.
     """
-    from hazard_loads import wind_pressure_psf
+    from hazard_loads import wind_pressure_psf, kz_exposure_c
     from limit_states import governing_dc
     from urm_wall import sample_walls, degradation_factor
     from fragility import V_HURRICANE, N_SAMPLES
@@ -354,6 +357,7 @@ def plot_degradation_sensitivity():
     cat3_mph = 111.0
     cmap = plt.get_cmap("plasma")
     arch_base = ARCHETYPES["turbine_hall"].copy()
+    Kz_th = kz_exposure_c(arch_base["height_ft_mean"])   # turbine hall Kz
 
     pf_at_cat3 = {}   # for dynamic caption
 
@@ -362,7 +366,7 @@ def plot_degradation_sensitivity():
         arch["year_built"] = yr
         walls = sample_walls(arch, N_SAMPLES, seed=10 + idx)
 
-        p_net = wind_pressure_psf(V_HURRICANE)
+        p_net = wind_pressure_psf(V_HURRICANE, Kz=Kz_th)
         ph = arch["panel_height_ft_mean"]
         F   = p_net * ph * arch["width_ft"]
         arm = np.full(len(V_HURRICANE), ph / 2.0)

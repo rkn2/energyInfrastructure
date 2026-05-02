@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from urm_wall import ARCHETYPES, sample_walls
 from hazard_loads import (
     wind_pressure_psf, tornado_pressure_psf, flood_total_force,
-    hurricane_landfall_forces, EF_MID_SPEEDS,
+    hurricane_landfall_forces, kz_exposure_c, EF_MID_SPEEDS,
     RETURN_PERIOD_WIND, RETURN_PERIOD_FLOOD,
 )
 from limit_states import governing_dc, governing_dc_combined
@@ -53,11 +53,13 @@ def hurricane_fragility(archetype: dict) -> dict:
     """
     P(wall failure | V_hurricane) for a single archetype.
     Force computed over full panel height; arm at mid-panel.
+    Kz computed from archetype mean roof height per ASCE 7-22 Exposure C.
     """
     walls = sample_walls(archetype, N_SAMPLES, seed=1)
-    ph = archetype["panel_height_ft_mean"]   # effective structural span
-    p_net = wind_pressure_psf(V_HURRICANE)   # (nV,) psf
-    F   = p_net * ph * archetype["width_ft"] # (nV,) lbf — over panel span
+    ph  = archetype["panel_height_ft_mean"]
+    Kz  = kz_exposure_c(archetype["height_ft_mean"])
+    p_net = wind_pressure_psf(V_HURRICANE, Kz=Kz)   # (nV,) psf
+    F   = p_net * ph * archetype["width_ft"]
     arm = np.full(len(V_HURRICANE), ph / 2.0)
 
     p_fail, modes = _run_hazard(walls, F, p_net, arm)
@@ -68,10 +70,12 @@ def tornado_fragility(archetype: dict) -> dict:
     """
     P(wall failure | EF category) for a single archetype.
     Tornado pressure includes 1.5× internal pressure amplification (ASCE 7-22 App. CC).
+    Kz computed from archetype mean roof height per ASCE 7-22 Exposure C.
     """
     walls = sample_walls(archetype, N_SAMPLES, seed=2)
-    ph = archetype["panel_height_ft_mean"]
-    p_net = tornado_pressure_psf(V_TORNADO)  # (6,) psf
+    ph  = archetype["panel_height_ft_mean"]
+    Kz  = kz_exposure_c(archetype["height_ft_mean"])
+    p_net = tornado_pressure_psf(V_TORNADO, Kz=Kz)  # (6,) psf
     F   = p_net * ph * archetype["width_ft"]
     arm = np.full(len(V_TORNADO), ph / 2.0)
 
@@ -84,13 +88,14 @@ def flood_fragility(archetype: dict) -> dict:
     P(wall failure | flood depth in ft) for a single archetype.
     Overturning uses total wall height; sliding uses degraded base area.
     Flood force and arm computed from hydrostatic + hydrodynamic resultant.
+    Buoyancy reduces overturning stabilizing moment per submerged wall volume.
     """
     walls = sample_walls(archetype, N_SAMPLES, seed=3)
     F, arm, p_eff = flood_total_force(DEPTH_FLOOD,
                                        V_water_fps=6.0,
                                        width_ft=archetype["width_ft"])
-    p_fail, modes = _run_hazard(walls, F, p_eff, arm)
-    return {"depth_ft": DEPTH_FLOOD, "p_fail": p_fail, "modes": modes}
+    result = governing_dc(walls, F, p_eff, arm, depth_ft_buoyancy=DEPTH_FLOOD)
+    return {"depth_ft": DEPTH_FLOOD, "p_fail": result["p_fail"], "modes": result["governing_mode"]}
 
 
 def combined_hurricane_fragility(archetype: dict) -> dict:
@@ -101,11 +106,15 @@ def combined_hurricane_fragility(archetype: dict) -> dict:
     Uses governing_dc_combined which correctly computes the flexure moment from
     a partial-depth flood load (concentrated-load approx at surge midpoint) rather
     than projecting surge force as a fictitious uniform pressure over the full panel.
+    Kz computed from archetype mean roof height per ASCE 7-22 Exposure C.
+    Overturning stabilizing weight reduced by buoyancy from storm surge.
     """
     walls = sample_walls(archetype, N_SAMPLES, seed=4)
     surge = surge_from_wind(V_HURRICANE)
+    Kz    = kz_exposure_c(archetype["height_ft_mean"])
     loads = hurricane_landfall_forces(V_HURRICANE, surge,
-                                       width_ft=archetype["width_ft"])
+                                       width_ft=archetype["width_ft"],
+                                       Kz=Kz)
 
     ph   = archetype["panel_height_ft_mean"]
     w    = archetype["width_ft"]

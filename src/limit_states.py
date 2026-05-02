@@ -65,17 +65,18 @@ def dc_base_sliding(walls: dict,
 
 def dc_overturning(walls: dict,
                    lateral_force_lbf: np.ndarray,
-                   moment_arm_ft: np.ndarray) -> np.ndarray:
+                   moment_arm_ft: np.ndarray,
+                   depth_ft_buoyancy: np.ndarray = None) -> np.ndarray:
     """
     Overturning about base (conservative: no uplift resistance from connections).
 
-    Demand:   M_ot = F · arm                           (lbf·ft)
-    Capacity: M_stab = W · t/2                         (lbf·ft)
+    Demand:   M_ot   = F · arm                                   (lbf·ft)
+    Capacity: M_stab = W_eff · t/2                               (lbf·ft)
 
-    NOTE: W uses full dry self-weight. For flood loading, partial submersion
-    reduces effective weight by buoyancy (γ_w · V_sub). Omitting buoyancy
-    overpredicts M_stab by ~8–12% at 10 ft submersion, making results
-    slightly non-conservative (understates failure probability for flood).
+    When depth_ft_buoyancy is provided (flood loading), the stabilizing weight
+    is reduced by the buoyant force on the submerged wall volume:
+        F_b = γ_w · t · min(h_flood, h_wall) · w     (lbf)
+        W_eff = max(W − F_b, 0)
 
     Returns D/C ratio array shape (n_intensity, n_samples).
     """
@@ -85,8 +86,18 @@ def dc_overturning(walls: dict,
     F    = lateral_force_lbf[:, np.newaxis]    # (nI, 1)
     arm  = moment_arm_ft[:, np.newaxis]        # (nI, 1)
 
-    M_ot   = F * arm                           # (nI, nS) lbf·ft
-    M_stab = W * (t / 2.0)                    # (nS,) lbf·ft
+    M_ot = F * arm                             # (nI, nS) lbf·ft
+
+    if depth_ft_buoyancy is not None:
+        h    = walls["h_ft"]                   # (nS,) total wall height
+        w    = walls["w_ft"]                   # (nS,)
+        h_sub = np.minimum(depth_ft_buoyancy[:, np.newaxis], h)   # (nI, nS)
+        F_b   = 62.4 * t * h_sub * w          # (nI, nS) lbf  (freshwater γ = 62.4 pcf)
+        W_eff = np.maximum(W - F_b, 0.0)      # (nI, nS)
+    else:
+        W_eff = W                              # (nS,) — broadcasts to (nI, nS)
+
+    M_stab = W_eff * (t / 2.0)                # (nI, nS) or broadcast equivalent
 
     return M_ot / np.maximum(M_stab, 1e-6)
 
@@ -137,12 +148,13 @@ def governing_dc_combined(walls: dict,
 
     Flexure uses the corrected partial-load moment (flood acts only over surge depth).
     Sliding and overturning use the total lateral force F_wind + F_flood.
+    Overturning stabilizing weight is reduced by buoyancy for the submerged surge depth.
     """
     F_total = F_wind_lbf + F_flood_lbf
 
     dc_f = dc_out_of_plane_flexure_combined(walls, p_wind_psf, F_flood_lbf, h_surge_ft)
     dc_s = dc_base_sliding(walls, F_total)
-    dc_o = dc_overturning(walls, F_total, arm_combined_ft)
+    dc_o = dc_overturning(walls, F_total, arm_combined_ft, depth_ft_buoyancy=h_surge_ft)
 
     dc_gov = np.maximum(dc_f, np.maximum(dc_s, dc_o))
     p_fail = (dc_gov >= 1.0).mean(axis=1)
@@ -160,14 +172,16 @@ def governing_dc_combined(walls: dict,
 def governing_dc(walls: dict,
                  lateral_force_lbf: np.ndarray,
                  pressure_psf: np.ndarray,
-                 moment_arm_ft: np.ndarray) -> dict:
+                 moment_arm_ft: np.ndarray,
+                 depth_ft_buoyancy: np.ndarray = None) -> dict:
     """
     Compute all three D/C ratios and return the governing (max) value.
 
     Inputs (all numpy arrays):
-        lateral_force_lbf : (nI,)  total lateral force per intensity level
-        pressure_psf      : (nI,)  equivalent uniform pressure for flexure
-        moment_arm_ft     : (nI,)  moment arm for overturning
+        lateral_force_lbf  : (nI,)  total lateral force per intensity level
+        pressure_psf       : (nI,)  equivalent uniform pressure for flexure
+        moment_arm_ft      : (nI,)  moment arm for overturning
+        depth_ft_buoyancy  : (nI,)  flood depth for buoyancy in overturning (None = no buoyancy)
 
     Returns dict with keys:
         dc_flex, dc_slide, dc_ot  — shape (nI, nS)
@@ -177,7 +191,7 @@ def governing_dc(walls: dict,
     """
     dc_f = dc_out_of_plane_flexure(walls, pressure_psf)
     dc_s = dc_base_sliding(walls, lateral_force_lbf)
-    dc_o = dc_overturning(walls, lateral_force_lbf, moment_arm_ft)
+    dc_o = dc_overturning(walls, lateral_force_lbf, moment_arm_ft, depth_ft_buoyancy)
 
     dc_gov = np.maximum(dc_f, np.maximum(dc_s, dc_o))
     p_fail = (dc_gov >= 1.0).mean(axis=1)
