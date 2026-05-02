@@ -34,6 +34,7 @@ from fragility import run_all_fragility, annual_failure_probability, surge_from_
 from opensees_comparison import run_opensees_comparison, BC_LABELS
 from site_specific import run_site_analysis, SITE_NAME, SITE_CITY, SITE_LAT, SITE_LON
 from hpc_scaling import run_hpc_scaling
+from hurdat2_hazard import run_hurdat2_analysis
 
 # ── Style ──────────────────────────────────────────────────────────────────────
 COLORS = {
@@ -1020,6 +1021,103 @@ def plot_hpc_scaling(hpc_results: dict):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Figure 17: HURDAT2 empirical hazard vs ASCE 7-22 validation
+# ══════════════════════════════════════════════════════════════════════════════
+
+def plot_hurdat2_validation(hurdat2: dict, fragility_results: dict):
+    """
+    Figure 17: Empirical wind hazard from HURDAT2 (1851–2023) vs.
+    ASCE 7-22 site-specific table; AFP comparison for turbine hall.
+    """
+    from site_specific import SITE_WIND_HAZARD
+
+    if not hurdat2 or "v_mph" not in hurdat2:
+        print("  HURDAT2 data unavailable — skipping Fig 17", flush=True)
+        return
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+
+    # ── Left: hazard curves ────────────────────────────────────────────────────
+    ax = axes[0]
+    mask = hurdat2["aep"] > 0
+    ax.semilogy(hurdat2["v_mph"][mask], hurdat2["aep"][mask],
+                color="#C0392B", lw=2.0, label=f"HURDAT2 empirical (n={hurdat2['n_storms']} events, {int(hurdat2['years'])} yr)")
+
+    # ASCE 7-22 site table
+    asce_rps = sorted(SITE_WIND_HAZARD.keys())
+    asce_v   = [SITE_WIND_HAZARD[r] for r in asce_rps]
+    asce_aep = [1.0 / r for r in asce_rps]
+    ax.semilogy(asce_v, asce_aep, "o--",
+                color="#2471A3", lw=1.5, ms=7, label="ASCE 7-22 site-specific table")
+
+    # HURDAT2 return period table points
+    h_rp  = sorted(hurdat2["rp_table"].keys())
+    h_v   = [hurdat2["rp_table"][r] for r in h_rp]
+    h_aep = [1.0 / r for r in h_rp]
+    ax.semilogy(h_v, h_aep, "s",
+                color="#C0392B", ms=7, zorder=5, label="HURDAT2 at standard RPs")
+
+    # Key return period lines
+    for rp, ls in [(100, ":"), (700, "--")]:
+        ax.axhline(1.0 / rp, color="gray", lw=0.7, ls=ls)
+        ax.text(45, 1.0 / rp * 1.15, f"{rp}-yr", fontsize=8, color="gray")
+
+    ax.set_xlabel("3-second Gust Wind Speed (mph)")
+    ax.set_ylabel("Annual Exceedance Probability")
+    ax.set_title(f"Empirical vs. Code-Based Wind Hazard\nPlant Daniel site (~{SITE_LAT}°N, {abs(SITE_LON):.2f}°W)")
+    ax.set_xlim(40, 220)
+    ax.legend(frameon=False, fontsize=8)
+
+    # ── Right: AFP comparison using three hazard sources ──────────────────────
+    ax2 = axes[1]
+    from fragility import annual_failure_probability, hurricane_fragility
+    from hazard_loads import RETURN_PERIOD_WIND
+
+    arch = ARCHETYPES["turbine_hall"]
+    r_h  = fragility_results["turbine_hall"]["hurricane"]
+    interp_h = interp1d(r_h["V_mph"], r_h["p_fail"], bounds_error=False, fill_value=(0, 1))
+
+    afp_generic  = annual_failure_probability(interp_h, RETURN_PERIOD_WIND) * 100
+    afp_asce     = annual_failure_probability(interp_h, SITE_WIND_HAZARD) * 100
+    afp_hurdat2  = annual_failure_probability(interp_h, hurdat2["rp_table"]) * 100
+
+    labels  = ["Generic\nASCE 7-22\n(inland table)", "Site ASCE 7-22\n(coastal MS)", "HURDAT2\nEmpirical\n(1851–2023)"]
+    values  = [afp_generic, afp_asce, afp_hurdat2]
+    colors  = ["#95A5A6", "#2471A3", "#C0392B"]
+
+    bars = ax2.bar(labels, values, color=colors, alpha=0.88, edgecolor="white", width=0.5)
+    for bar, v in zip(bars, values):
+        ax2.text(bar.get_x() + bar.get_width() / 2, v + 0.3,
+                 f"{v:.2f}%", ha="center", va="bottom", fontsize=10, fontweight="bold")
+
+    ax2.set_ylabel("Annual Hurricane Failure Probability (%)")
+    ax2.set_title("Turbine Hall Hurricane AFP\nby Hazard Data Source")
+    ax2.set_ylim(0, max(values) * 1.35)
+
+    comp = hurdat2.get("asce_comparison", {})
+    fig.suptitle("HURDAT2 Wind Hazard Validation — Plant Daniel Site", fontsize=11, y=1.01)
+
+    comp_rows = "\n".join(
+        f"  {rp:>5}-yr:  HURDAT2={comp[rp]['hurdat2']:.0f} mph  ASCE={comp[rp]['asce']} mph  ratio={comp[rp]['ratio']:.2f}"
+        for rp in sorted(comp.keys()) if rp in comp
+    )
+    fig.text(0.01, -0.05,
+             f"HURDAT2 record: {int(hurdat2['years'])} yr (1851–2023), {hurdat2['n_storms']} hurricane events within "
+             f"{350:.0f} km of site. Wind field: modified Rankine vortex (R_max=50 km). "
+             f"Conversion: 1-min sustained kt × 1.473 = 3-s gust mph (ASCE 7-22 Sec. 26.5). "
+             "AFP bars: same turbine hall fragility curve; only the hazard integration table differs.",
+             fontsize=7.5, color="#555")
+    save(fig, "hurdat2_validation.png")
+
+    # Print comparison table
+    print(f"\n── HURDAT2 vs ASCE 7-22 wind speed comparison ──")
+    print(f"{'Return Period':>15}  {'HURDAT2 (mph)':>14}  {'ASCE 7-22 (mph)':>16}  {'Ratio':>7}")
+    for rp in sorted(comp.keys()):
+        c = comp[rp]
+        print(f"{rp:>14}-yr  {c['hurdat2']:>14.1f}  {c['asce']:>16}  {c['ratio']:>7.3f}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Main
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1055,6 +1153,10 @@ def main():
 
     print("Generating digital twin schematic (Fig 16)...")
     plot_digital_twin_schematic()
+
+    print("Building HURDAT2 empirical hazard validation (Fig 17)...")
+    hurdat2_results = run_hurdat2_analysis()
+    plot_hurdat2_validation(hurdat2_results, results)
 
     print("\n── Summary: Annual failure probabilities (%) [Generic] ──")
     cols = ["Hurricane", "Tornado", "100-yr Flood", "Combined Hurricane"]

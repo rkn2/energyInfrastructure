@@ -14,7 +14,11 @@ McKenna et al. (2010) — OpenSeesPy; fiber-section runtime basis.
 """
 import numpy as np
 
-PORTFOLIO_SIZE      = 400     # pre-1950 URM thermal plant buildings in US hurricane zone
+# Portfolio size basis: EIA-860 2024 shows 62 active fossil plants with pre-1950
+# generators (×4–6 URM buildings/plant = 248–372 bldgs) and 108 active steam plants
+# with pre-1960 generators (×4–6 = 432–648 bldgs). Using 400 as a conservative
+# mid-range estimate for the pre-1960 steam portfolio in hurricane-exposed states.
+PORTFOLIO_SIZE      = 400
 STORM_SCENARIOS_FEM = 100     # HURDAT2-representative storm tracks for 3D FEM
 STORM_SCENARIOS_DEM = 10      # DEM particle model (expensive — fewer scenarios)
 
