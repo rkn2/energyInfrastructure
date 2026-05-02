@@ -20,6 +20,9 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
+from matplotlib.legend import Legend
+from matplotlib.lines import Line2D
 from scipy.interpolate import interp1d
 
 from urm_wall import ARCHETYPES
@@ -215,13 +218,17 @@ def plot_combined_fragility(results: dict):
         ax_right.plot(r_c["V_mph"], r_c["p_fail"],
                       color=COLORS[key], ls="-", lw=2.0,
                       label=arch["label"])
-    # Explain line styles via proxy artists
-    from matplotlib.lines import Line2D
-    ax_right.add_artist(ax_right.legend(frameon=False, loc="upper left"))
-    style_legend = ax_right.legend(
-        handles=[Line2D([0], [0], color="k", ls="--", lw=1.5, alpha=0.5, label="Wind only"),
-                 Line2D([0], [0], color="k", ls="-",  lw=2.0,             label="Wind + surge")],
-        frameon=False, loc="center left", fontsize=8)
+    # Two separate legends: archetype colors (upper-left) + line styles (lower-right)
+    # Use Legend class directly to avoid the second ax.legend() replacing the first.
+    arch_legend = ax_right.legend(frameon=False, loc="upper left")
+    style_handles = [
+        Line2D([0], [0], color="k", ls="--", lw=1.5, alpha=0.5, label="Wind only"),
+        Line2D([0], [0], color="k", ls="-",  lw=2.0,             label="Wind + surge"),
+    ]
+    style_legend = Legend(ax_right, style_handles,
+                          [h.get_label() for h in style_handles],
+                          frameon=False, loc="lower right", fontsize=8)
+    ax_right.add_artist(arch_legend)
     ax_right.add_artist(style_legend)
     for p_ref in [0.10, 0.50]:
         ax_right.axhline(p_ref, color="#888", lw=0.7, ls=":")
@@ -249,7 +256,6 @@ def plot_risk_matrix(results: dict):
     Demonstrates that legacy URM plants face order-of-magnitude higher risk
     than the industry implicitly assumes.
     """
-    from hazard_loads import RETURN_PERIOD_WIND, RETURN_PERIOD_FLOOD
 
     hazard_labels = ["Hurricane\nWind", "EF2+ Tornado\n(annual rate)", "100-yr\nFlood", "Combined\nHurricane"]
     arch_labels = [ARCHETYPES[k]["label"] for k in ARCHETYPES]
@@ -289,7 +295,6 @@ def plot_risk_matrix(results: dict):
     fig, ax = plt.subplots(figsize=(8, 3.5))
 
     # Log-scale colormap so we can see variation from 0.01% to 10%+
-    from matplotlib.colors import LogNorm
     afp_clipped = np.clip(afp, 0.01, 100.0)
     im = ax.imshow(afp_clipped, cmap="YlOrRd",
                    norm=LogNorm(vmin=0.01, vmax=afp_clipped.max() * 2),
@@ -335,8 +340,8 @@ def plot_risk_matrix(results: dict):
 def plot_degradation_sensitivity():
     """
     Show how hurricane wind fragility for the turbine hall shifts as a function
-    of construction year (1890, 1910, 1930, 1950) — key argument for why aging
-    plants face invisibly elevated risk.
+    of construction year (1895–1950) — key argument for why aging plants face
+    invisibly elevated risk that is invisible to current inspection practice.
     """
     from hazard_loads import wind_pressure_psf
     from limit_states import governing_dc
@@ -346,8 +351,11 @@ def plot_degradation_sensitivity():
     fig, ax = plt.subplots(figsize=(7, 4.5))
 
     years = [1895, 1910, 1925, 1940, 1950]
+    cat3_mph = 111.0
     cmap = plt.get_cmap("plasma")
     arch_base = ARCHETYPES["turbine_hall"].copy()
+
+    pf_at_cat3 = {}   # for dynamic caption
 
     for idx, yr in enumerate(years):
         arch = arch_base.copy()
@@ -356,7 +364,7 @@ def plot_degradation_sensitivity():
 
         p_net = wind_pressure_psf(V_HURRICANE)
         ph = arch["panel_height_ft_mean"]
-        F = p_net * ph * arch["width_ft"]
+        F   = p_net * ph * arch["width_ft"]
         arm = np.full(len(V_HURRICANE), ph / 2.0)
 
         result = governing_dc(walls, F, p_net, arm)
@@ -366,12 +374,17 @@ def plot_degradation_sensitivity():
                 color=color, lw=2.0,
                 label=f"Built {yr} (deg. factor = {deg:.2f})")
 
+        # Interpolate P(fail) at Cat 3 for caption
+        pf_at_cat3[yr] = float(
+            interp1d(V_HURRICANE, result["p_fail"], bounds_error=False,
+                     fill_value=(0, 1))(cat3_mph)
+        )
+
     for p_ref in [0.10, 0.50]:
         ax.axhline(p_ref, color="#888", lw=0.7, ls=":")
         ax.text(202, p_ref + 0.01, f"{int(p_ref*100)}%", fontsize=8, color="#888")
 
-    # Mark Cat 3 hurricane ~111 mph
-    ax.axvline(111, color="gray", lw=0.9, ls="--")
+    ax.axvline(cat3_mph, color="gray", lw=0.9, ls="--")
     ax.text(113, 0.05, "Cat 3", fontsize=8, color="gray")
 
     ax.set_xlabel("3-second Gust Wind Speed (mph)")
@@ -380,10 +393,12 @@ def plot_degradation_sensitivity():
     ax.set_xlim(60, 200)
     ax.set_ylim(0, 1.05)
     ax.legend(loc="upper left", frameon=False, fontsize=9)
+
+    oldest, newest = years[0], years[-1]
     fig.text(0.01, -0.03,
-             "Same archetype geometry; degradation factor reduces effective material strength with age. "
-             "A 1925-built turbine hall fails at ~35% probability under a Cat 3 hurricane; "
-             "a 1950-built equivalent is below 10%.",
+             f"Same archetype geometry; degradation reduces effective material strength with age. "
+             f"Built-{oldest} turbine hall: {pf_at_cat3[oldest]:.0%} failure probability at Cat 3; "
+             f"built-{newest}: {pf_at_cat3[newest]:.0%}.",
              fontsize=7.5, color="#555")
     save(fig, "degradation_sensitivity.png")
 

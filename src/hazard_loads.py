@@ -132,8 +132,15 @@ def hurricane_landfall_forces(V_wind_mph: float | np.ndarray,
 
 # ── Return-period wind speed table (approximation for ASCE 7-22 Risk Cat II) ──
 # Representative Gulf/Atlantic Coast exposure; used for annual risk calculation.
+# Short-return-period entries (1–5 yr) are approximate; they anchor the lower
+# tail of the integral and prevent truncation errors for archetypes that start
+# failing below the 10-yr wind speed.  Values from NWS climatology for coastal
+# SE US; treat as order-of-magnitude estimates.
 RETURN_PERIOD_WIND = {
-    10:   85,    # mph, 3-s gust
+    1:    55,    # mph, 3-s gust (approximate calm-year wind)
+    2:    65,
+    5:    76,
+    10:   85,
     25:   100,
     50:   115,
     100:  130,

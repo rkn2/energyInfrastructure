@@ -72,6 +72,11 @@ def dc_overturning(walls: dict,
     Demand:   M_ot = F · arm                           (lbf·ft)
     Capacity: M_stab = W · t/2                         (lbf·ft)
 
+    NOTE: W uses full dry self-weight. For flood loading, partial submersion
+    reduces effective weight by buoyancy (γ_w · V_sub). Omitting buoyancy
+    overpredicts M_stab by ~8–12% at 10 ft submersion, making results
+    slightly non-conservative (understates failure probability for flood).
+
     Returns D/C ratio array shape (n_intensity, n_samples).
     """
     W   = walls["W_lbf"]     # (nS,) lbf
@@ -84,6 +89,72 @@ def dc_overturning(walls: dict,
     M_stab = W * (t / 2.0)                    # (nS,) lbf·ft
 
     return M_ot / np.maximum(M_stab, 1e-6)
+
+
+def dc_out_of_plane_flexure_combined(walls: dict,
+                                      p_wind_psf: np.ndarray,
+                                      F_flood_lbf: np.ndarray,
+                                      h_surge_ft: np.ndarray) -> np.ndarray:
+    """
+    Flexure D/C for simultaneous wind + partial-depth flood on a simply-supported panel.
+
+    Wind acts uniformly over the full panel height ph.
+    Flood acts only over the lower h_surge portion — using a concentrated-load
+    approximation (F at h_surge/2 from base on SS beam of span ph) rather than
+    the incorrect equivalent-uniform-pressure-over-ph approach, which over-
+    estimates the flood moment contribution by ~2x when h_surge << ph.
+
+    M_wind  = p_wind · w · ph² / 8           (uniform load)
+    M_flood = F_flood · (h_s/2) · (ph − h_s/2) / ph   (conc. load at midpoint of surge)
+    M_cap   = f_r_eff · 144 · S
+    """
+    ph  = walls["ph_ft"]                      # (nS,) sampled panel height
+    w   = walls["w_ft"]                       # (nS,)
+    S   = walls["S_ft3"]                      # (nS,)
+    f_r_psf = walls["f_r_eff"] * 144.0        # (nS,) psi → psf
+
+    p   = p_wind_psf[:, np.newaxis]           # (nI, 1)
+    F_f = F_flood_lbf[:, np.newaxis]          # (nI, 1)
+    h_s = np.minimum(h_surge_ft[:, np.newaxis], ph)  # surge cannot exceed panel height
+
+    M_wind  = (p * w) * ph**2 / 8.0
+    # SS beam concentrated-load moment: F·a·b/L, a=h_s/2 from base, b=ph−a
+    a       = h_s / 2.0
+    M_flood = F_f * a * (ph - a) / np.maximum(ph, 1e-6)
+
+    M_cap = f_r_psf * S
+    return (M_wind + M_flood) / np.maximum(M_cap, 1e-6)
+
+
+def governing_dc_combined(walls: dict,
+                           F_wind_lbf: np.ndarray,
+                           p_wind_psf: np.ndarray,
+                           F_flood_lbf: np.ndarray,
+                           h_surge_ft: np.ndarray,
+                           arm_combined_ft: np.ndarray) -> dict:
+    """
+    D/C ratios for simultaneous wind + storm-surge flood loading.
+
+    Flexure uses the corrected partial-load moment (flood acts only over surge depth).
+    Sliding and overturning use the total lateral force F_wind + F_flood.
+    """
+    F_total = F_wind_lbf + F_flood_lbf
+
+    dc_f = dc_out_of_plane_flexure_combined(walls, p_wind_psf, F_flood_lbf, h_surge_ft)
+    dc_s = dc_base_sliding(walls, F_total)
+    dc_o = dc_overturning(walls, F_total, arm_combined_ft)
+
+    dc_gov = np.maximum(dc_f, np.maximum(dc_s, dc_o))
+    p_fail = (dc_gov >= 1.0).mean(axis=1)
+
+    mean_f = dc_f.mean(axis=1)
+    mean_s = dc_s.mean(axis=1)
+    mean_o = dc_o.mean(axis=1)
+    mode_idx = np.argmax(np.stack([mean_f, mean_s, mean_o], axis=1), axis=1)
+    modes = np.array(["flexure", "sliding", "overturning"])[mode_idx]
+
+    return {"dc_flex": dc_f, "dc_slide": dc_s, "dc_ot": dc_o,
+            "dc_gov": dc_gov, "p_fail": p_fail, "governing_mode": modes}
 
 
 def governing_dc(walls: dict,

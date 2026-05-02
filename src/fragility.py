@@ -19,7 +19,7 @@ from hazard_loads import (
     hurricane_landfall_forces, EF_MID_SPEEDS,
     RETURN_PERIOD_WIND, RETURN_PERIOD_FLOOD,
 )
-from limit_states import governing_dc
+from limit_states import governing_dc, governing_dc_combined
 
 N_SAMPLES = 12_000   # per archetype; balance between accuracy and speed
 
@@ -97,31 +97,39 @@ def combined_hurricane_fragility(archetype: dict) -> dict:
     """
     P(wall failure | V_hurricane) under simultaneous storm surge + wind (landfall).
     Surge depth correlated with wind speed via surge_from_wind().
+
+    Uses governing_dc_combined which correctly computes the flexure moment from
+    a partial-depth flood load (concentrated-load approx at surge midpoint) rather
+    than projecting surge force as a fictitious uniform pressure over the full panel.
     """
     walls = sample_walls(archetype, N_SAMPLES, seed=4)
     surge = surge_from_wind(V_HURRICANE)
     loads = hurricane_landfall_forces(V_HURRICANE, surge,
                                        width_ft=archetype["width_ft"])
 
-    ph = archetype["panel_height_ft_mean"]
-    F_wind  = loads["p_wind_psf"] * ph * archetype["width_ft"]
-    F_flood = loads["F_flood_lbf"]
-    F_total = F_wind + F_flood
+    ph   = archetype["panel_height_ft_mean"]
+    w    = archetype["width_ft"]
+    F_wind  = loads["p_wind_psf"] * ph * w   # (nV,) force over panel span
+    F_flood = loads["F_flood_lbf"]            # (nV,) hydrostatic + hydrodynamic
 
-    # Effective uniform pressure for flexure check (over panel height)
-    p_combined = F_total / (ph * archetype["width_ft"])
-
-    # Weighted moment arm for overturning
+    # Overturning arm: weighted resultant from base
     arm_wind  = ph / 2.0
     arm_combined = np.where(
-        F_total > 0,
-        (F_wind * arm_wind + F_flood * loads["arm_flood_ft"]) / F_total,
+        (F_wind + F_flood) > 0,
+        (F_wind * arm_wind + F_flood * loads["arm_flood_ft"]) / (F_wind + F_flood),
         arm_wind,
     )
 
-    p_fail, modes = _run_hazard(walls, F_total, p_combined, arm_combined)
+    result = governing_dc_combined(
+        walls,
+        F_wind_lbf   = F_wind,
+        p_wind_psf   = loads["p_wind_psf"],
+        F_flood_lbf  = F_flood,
+        h_surge_ft   = surge,
+        arm_combined_ft = arm_combined,
+    )
     return {"V_mph": V_HURRICANE, "surge_ft": surge,
-            "p_fail": p_fail, "modes": modes}
+            "p_fail": result["p_fail"], "modes": result["governing_mode"]}
 
 
 def run_all_fragility() -> dict:
