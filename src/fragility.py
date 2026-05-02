@@ -160,6 +160,14 @@ def run_all_fragility() -> dict:
 
 # ── Annual failure probability ─────────────────────────────────────────────────
 
+def union_afp(afp_list: list) -> float:
+    """Multi-hazard union AFP: 1 - Π(1 - AFPᵢ). Assumes independence (upper bound)."""
+    result = 1.0
+    for a in afp_list:
+        result *= (1.0 - a)
+    return 1.0 - result
+
+
 def annual_failure_probability(fragility_interp, hazard_table: dict) -> float:
     """
     Annual failure probability via hazard-fragility convolution

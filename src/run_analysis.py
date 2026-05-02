@@ -30,7 +30,7 @@ from hazard_loads import (
     RETURN_PERIOD_WIND, RETURN_PERIOD_FLOOD,
     EF_LABELS, EF_MID_SPEEDS,
 )
-from fragility import run_all_fragility, annual_failure_probability, surge_from_wind
+from fragility import run_all_fragility, annual_failure_probability, surge_from_wind, union_afp
 from opensees_comparison import run_opensees_comparison, BC_LABELS
 from site_specific import run_site_analysis, SITE_NAME, SITE_CITY, SITE_LAT, SITE_LON
 from hpc_scaling import run_hpc_scaling
@@ -260,11 +260,12 @@ def plot_risk_matrix(results: dict):
     than the industry implicitly assumes.
     """
 
-    hazard_labels = ["Hurricane\nWind", "EF2+ Tornado\n(annual rate)", "100-yr\nFlood", "Combined\nHurricane"]
+    hazard_labels = ["Hurricane\nWind", "EF2+ Tornado\n(annual rate)", "100-yr\nFlood",
+                     "Combined\nHurricane†", "Multi-hazard\nUnion‡"]
     arch_labels = [ARCHETYPES[k]["label"] for k in ARCHETYPES]
 
     # Approximate annual failure probabilities
-    afp = np.zeros((len(ARCHETYPES), 4))
+    afp = np.zeros((len(ARCHETYPES), 5))
 
     for i, key in enumerate(ARCHETYPES):
         arch = ARCHETYPES[key]
@@ -298,7 +299,14 @@ def plot_risk_matrix(results: dict):
                             bounds_error=False, fill_value=(0, 1))
         afp[i, 3] = annual_failure_probability(interp_c, RETURN_PERIOD_WIND) * 100
 
-    fig, ax = plt.subplots(figsize=(8, 3.5))
+        # Multi-hazard union: hurricane (wind+surge) ∪ tornado ∪ independent flood
+        # Independent flood fraction ≈ 0.5 for coastal industrial sites (remaining
+        # 50% is hurricane storm surge, already captured in combined hurricane AFP).
+        afp[i, 4] = union_afp([afp[i, 3] / 100,
+                                afp[i, 1] / 100,
+                                afp[i, 2] / 100 * 0.5]) * 100
+
+    fig, ax = plt.subplots(figsize=(10, 3.5))
 
     # Log-scale colormap so we can see variation from 0.01% to 10%+
     afp_clipped = np.clip(afp, 0.01, 100.0)
@@ -306,7 +314,7 @@ def plot_risk_matrix(results: dict):
                    norm=LogNorm(vmin=0.01, vmax=afp_clipped.max() * 2),
                    aspect="auto")
 
-    ax.set_xticks(range(4))
+    ax.set_xticks(range(5))
     ax.set_xticklabels(hazard_labels, fontsize=10)
     ax.set_yticks(range(len(arch_labels)))
     ax.set_yticklabels(arch_labels, fontsize=10)
@@ -316,7 +324,7 @@ def plot_risk_matrix(results: dict):
 
     # Annotate each cell
     for i in range(len(ARCHETYPES)):
-        for j in range(4):
+        for j in range(5):
             v = afp[i, j]
             txt = f"{v:.2f}%" if v >= 0.01 else "<0.01%"
             color = "white" if afp_clipped[i, j] > 1.0 else "black"
@@ -326,14 +334,16 @@ def plot_risk_matrix(results: dict):
     cbar = fig.colorbar(im, ax=ax, pad=0.02, shrink=0.8)
     cbar.set_label("Annual Failure Probability (%)", fontsize=9)
 
-    fig.text(0.01, -0.06,
+    fig.text(0.01, -0.08,
              "Annual failure probability via hazard-fragility convolution: λ_f = Σ P(fail|IM) · Δλ(IM) "
              "(Cornell & Krawinkler 2000; Kennedy & Short 1994). "
-             "Wind: ASCE 7-22 Risk Cat II hazard curve (10-yr to 1700-yr return periods). "
+             "Wind: ASCE 7-22 Risk Cat II hazard curve (10–1700-yr return periods). "
              "Flood: FEMA Zone AE depths (conditional on site being in floodplain). "
              "Tornado: Tippett et al. (2016) SE US rates scaled to ~0.2 km² plant footprint. "
-             "Reference: ASCE 7-22 Risk Cat II design wind → 700-yr RP (0.14%/yr exceedance probability); "
-             "these archetypes reach >50% panel failure well below the 700-yr wind speed.",
+             "† Combined Hurricane includes simultaneous wind + storm surge (Irish et al. 2008 Gulf Coast). "
+             "‡ Multi-hazard Union = 1−(1−AFP_hurricane)(1−AFP_tornado)(1−0.5·AFP_flood): "
+             "flood scaled by 0.5 because ~50% of coastal flood risk is storm surge already in AFP_hurricane "
+             "(Vickery et al. 2009); treating all three as fully independent would overstate risk by ~1.3×.",
              fontsize=7.5, color="#555", wrap=True)
     save(fig, "risk_matrix.png")
 
@@ -409,6 +419,299 @@ def plot_degradation_sensitivity():
              f"built-{newest}: {pf_at_cat3[newest]:.0%}.",
              fontsize=7.5, color="#555")
     save(fig, "degradation_sensitivity.png")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Figure 6b: Grid consequence model (Expected Annual Energy Loss)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def plot_consequence_model(afp: np.ndarray):
+    """
+    Figure 14. Translate AFP into Expected Annual Outage (days) and
+    Expected Annual Energy Loss (MWh). afp is (3,5) from plot_risk_matrix;
+    column 4 is the multi-hazard union AFP.
+    """
+    # Post-storm restoration days per unit type (EIA-860 post-Katrina/Sandy coal unit data;
+    # EPRI TR-1026889 2012 power plant storm recovery report).
+    RESTORATION_DAYS = {
+        "boiler_house": 30,   # boiler/pressure-vessel inspection + refractory repair
+        "turbine_hall": 45,   # turbine alignment + steam path inspection
+        "powerhouse":   21,   # shorter — lower-voltage switchgear, simpler restart
+    }
+    UNIT_CAPACITY_MW = 200  # representative pre-1950 steam generation unit (EIA-860)
+    WHOLESALE_RATE_PER_MWH = 45.0  # $/MWh, MISO/SERC average 2023 (EIA 861)
+
+    arch_keys   = list(ARCHETYPES.keys())
+    arch_labels = [ARCHETYPES[k]["label"] for k in arch_keys]
+    rest_days   = np.array([RESTORATION_DAYS[k] for k in arch_keys], dtype=float)
+
+    union_afp_frac = afp[:, 4] / 100.0            # multi-hazard union, col 4
+    eaod  = union_afp_frac * rest_days             # expected annual outage days
+    eal_mwh = eaod * 24.0 * UNIT_CAPACITY_MW       # expected annual energy loss (MWh)
+    eal_m_usd = eal_mwh * WHOLESALE_RATE_PER_MWH / 1e6  # millions USD
+
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.2))
+    palette = [COLORS[k] for k in arch_keys]
+
+    def _bar(ax, vals, ylabel, title, fmt):
+        bars = ax.bar(arch_labels, vals, color=palette, alpha=0.88, edgecolor="white")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        for bar, v in zip(bars, vals):
+            ax.text(bar.get_x() + bar.get_width() / 2, v * 1.04,
+                    fmt.format(v), ha="center", va="bottom", fontsize=9)
+
+    _bar(axes[0], eaod,         "Expected Annual Outage (days)",
+         "Expected Annual\nOutage Days", "{:.2f} d")
+    _bar(axes[1], eal_mwh / 1e3, "Expected Annual Energy Loss (GWh)",
+         f"Expected Annual\nEnergy Loss ({UNIT_CAPACITY_MW} MW unit)", "{:.1f} GWh")
+    _bar(axes[2], eal_m_usd,    "Expected Annual Revenue Loss ($M)",
+         f"Expected Annual\nRevenue Loss (@${WHOLESALE_RATE_PER_MWH}/MWh)", "${:.2f}M")
+
+    fig.suptitle(
+        "Grid Consequence Model — Annual Energy and Revenue Risk from Multi-Hazard URM Failure",
+        fontsize=11, y=1.02,
+    )
+    fig.text(
+        0.01, -0.04,
+        f"Multi-hazard AFP (column 5 of risk matrix): 1−(1−AFP_hurricane)(1−AFP_tornado)(1−0.5·AFP_flood). "
+        f"Restoration times from EIA-860 post-Katrina (2005) and EPRI TR-1026889 (2012). "
+        f"Unit capacity {UNIT_CAPACITY_MW} MW representative of pre-1950 steam plant; "
+        f"actual Victor J. Daniel Jr. capacity is 1,252 MW — scale accordingly. "
+        f"Does not include cascading outage risk to interconnected units or grid-level reliability impact.",
+        fontsize=7.5, color="#555",
+    )
+    save(fig, "consequence_model.png")
+    return {"eaod": eaod, "eal_mwh": eal_mwh, "eal_m_usd": eal_m_usd,
+            "restoration_days": rest_days, "unit_mw": UNIT_CAPACITY_MW}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Figure 15: AFP epistemic uncertainty (sensitivity tornado chart)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def plot_afp_uncertainty(results: dict):
+    """
+    One-at-a-time sensitivity of turbine hall hurricane AFP to epistemic
+    uncertainty in hazard table and material parameters.
+    """
+    from hazard_loads import wind_pressure_psf, kz_exposure_c, RETURN_PERIOD_WIND as RPW
+    from limit_states import governing_dc
+    from urm_wall import sample_walls
+    from fragility import V_HURRICANE, N_SAMPLES
+
+    key  = "turbine_hall"
+    arch = ARCHETYPES[key]
+    Kz   = kz_exposure_c(arch["height_ft_mean"])
+    ph   = arch["panel_height_ft_mean"]
+
+    r_base   = results[key]["hurricane"]
+    interp_b = interp1d(r_base["V_mph"], r_base["p_fail"],
+                        bounds_error=False, fill_value=(0, 1))
+    afp_base = annual_failure_probability(interp_b, RPW) * 100
+
+    def _afp_from_walls(walls_d, hz=RPW):
+        p_net  = wind_pressure_psf(V_HURRICANE, Kz=Kz)
+        F      = p_net * ph * arch["width_ft"]
+        arm    = np.full(len(V_HURRICANE), ph / 2.0)
+        result = governing_dc(walls_d, F, p_net, arm)
+        itp    = interp1d(V_HURRICANE, result["p_fail"],
+                          bounds_error=False, fill_value=(0, 1))
+        return annual_failure_probability(itp, hz) * 100
+
+    perturbations = []
+
+    # Wind hazard ±10%
+    for scale, label in [(0.9, "Wind hazard −10%"), (1.1, "Wind hazard +10%")]:
+        hz_s = {rp: v * scale for rp, v in RPW.items()}
+        perturbations.append((label, _afp_from_walls(
+            sample_walls(arch, N_SAMPLES, seed=1), hz=hz_s) - afp_base))
+
+    # f_m CoV ±0.05
+    for delta, label in [(-0.05, "Masonry f_m CoV −0.05"), (+0.05, "Masonry f_m CoV +0.05")]:
+        a2 = {**arch, "f_m_cov": arch["f_m_cov"] + delta}
+        perturbations.append((label, _afp_from_walls(
+            sample_walls(a2, N_SAMPLES, seed=99)) - afp_base))
+
+    # f_r CoV ±0.10
+    for delta, label in [(-0.10, "Modulus of rupture CoV −0.10"), (+0.10, "Modulus of rupture CoV +0.10")]:
+        a2 = {**arch, "f_r_cov": arch["f_r_cov"] + delta}
+        perturbations.append((label, _afp_from_walls(
+            sample_walls(a2, N_SAMPLES, seed=100)) - afp_base))
+
+    # Aging: ±20 years on construction date
+    for dyear, label in [(+20, "Built 20 yrs later (less degraded)"),
+                         (-20, "Built 20 yrs earlier (more degraded)")]:
+        a2 = {**arch, "year_built": arch["year_built"] + dyear}
+        perturbations.append((label, _afp_from_walls(
+            sample_walls(a2, N_SAMPLES, seed=101)) - afp_base))
+
+    perturbations.sort(key=lambda x: abs(x[1]))
+    labels  = [p[0] for p in perturbations]
+    deltas  = [p[1] for p in perturbations]
+    bar_col = ["#C0392B" if d > 0 else "#2471A3" for d in deltas]
+
+    ci_lo = afp_base + min(deltas)
+    ci_hi = afp_base + max(deltas)
+
+    fig, ax = plt.subplots(figsize=(9, 4.8))
+    ax.barh(labels, deltas, color=bar_col, height=0.6, edgecolor="white")
+    ax.axvline(0, color="black", lw=0.9)
+
+    for i, (lbl, d) in enumerate(zip(labels, deltas)):
+        offset = 0.06 if d >= 0 else -0.06
+        ax.text(d + offset, i, f"{d:+.2f}%", va="center",
+                ha="left" if d >= 0 else "right", fontsize=8.5)
+
+    ax.set_xlabel("ΔAFP (percentage points) relative to base case")
+    ax.set_title(
+        f"AFP Sensitivity to Epistemic Uncertainty — Turbine Hall Hurricane\n"
+        f"Base AFP = {afp_base:.2f}%  |  Range: [{ci_lo:.2f}%, {ci_hi:.2f}%]  "
+        f"(~{ci_hi/ci_lo:.1f}× spread from parameter uncertainty alone)"
+    )
+    fig.text(
+        0.01, -0.04,
+        "One-at-a-time sensitivity; all other parameters at base case. "
+        "Red = AFP increases; blue = AFP decreases. "
+        f"Wind hazard uncertainty dominates: ±10% in 700-yr wind speed produces "
+        f"the largest AFP swing. "
+        "Bayesian updating from field measurements (accelerometers, anemometers) "
+        "would reduce epistemic uncertainty and narrow this interval.",
+        fontsize=7.5, color="#555",
+    )
+    save(fig, "afp_uncertainty.png")
+    return {"afp_base": afp_base, "ci_lo": ci_lo, "ci_hi": ci_hi,
+            "perturbations": perturbations}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Figure 16: Digital twin data-flow schematic
+# ══════════════════════════════════════════════════════════════════════════════
+
+def plot_digital_twin_schematic():
+    """
+    Conceptual data-flow diagram for the HPC4EI digital twin framework.
+    Shows sensor types, data ingestion, HPC physics engine, and output dashboard.
+    """
+    from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+
+    fig, ax = plt.subplots(figsize=(13, 7))
+    ax.set_xlim(0, 13)
+    ax.set_ylim(0, 7)
+    ax.axis("off")
+
+    def box(x, y, w, h, label, sublabel, color, fontsize=9):
+        patch = FancyBboxPatch((x, y), w, h,
+                               boxstyle="round,pad=0.1",
+                               facecolor=color, edgecolor="#555", linewidth=1.2)
+        ax.add_patch(patch)
+        ax.text(x + w / 2, y + h / 2 + (0.18 if sublabel else 0),
+                label, ha="center", va="center",
+                fontsize=fontsize, fontweight="bold", wrap=True)
+        if sublabel:
+            ax.text(x + w / 2, y + h / 2 - 0.25,
+                    sublabel, ha="center", va="center",
+                    fontsize=7.5, color="#333", style="italic")
+
+    def arrow(x1, y1, x2, y2, label=""):
+        ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
+                    arrowprops=dict(arrowstyle="-|>", color="#444",
+                                   lw=1.5, connectionstyle="arc3,rad=0.0"))
+        if label:
+            mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+            ax.text(mx + 0.05, my + 0.12, label, fontsize=7.5, color="#555")
+
+    # Column 1: Sensors (left)
+    ax.text(1.5, 6.65, "SENSING LAYER", ha="center", va="center",
+            fontsize=9, color="#555", fontweight="bold")
+    sensor_items = [
+        ("Wall\nAccelerometers", "Modal ID → stiffness loss", "#D6EAF8"),
+        ("Anemometer\nArray", "Local V_wind (rooftop + base)", "#D6EAF8"),
+        ("Flood / Surge\nGauge", "Real-time surge depth (ft)", "#D6EAF8"),
+        ("CCTV + AI\nVision", "Post-event crack detection", "#D6EAF8"),
+        ("SCADA\nTelemetry", "MW output, operational state", "#D6EAF8"),
+    ]
+    for idx, (lbl, sub, col) in enumerate(sensor_items):
+        box(0.15, 5.65 - idx * 1.1, 2.7, 0.85, lbl, sub, col, fontsize=8)
+
+    # Column 2: Data ingestion / state estimation
+    ax.text(5.05, 6.65, "INGESTION & STATE UPDATE", ha="center", va="center",
+            fontsize=9, color="#555", fontweight="bold")
+    box(3.7, 5.1, 2.7, 1.0, "Data Quality &\nAnomaly Filter",
+        "Spike removal; sensor dropout flags", "#D5F5E3")
+    box(3.7, 3.5, 2.7, 1.2, "Bayesian State\nEstimator",
+        "Updates f_m, f_r, deg posteriors\nfrom accelerometer modal data", "#D5F5E3")
+    box(3.7, 1.9, 2.7, 1.2, "Hazard Ingestion\n(NOAA / NWS API)",
+        "Live wind forecast + SLOSH surge\nfeed into demand model", "#D5F5E3")
+
+    # Column 3: HPC physics
+    ax.text(8.65, 6.65, "HPC PHYSICS ENGINE", ha="center", va="center",
+            fontsize=9, color="#555", fontweight="bold")
+    box(7.3, 4.7, 2.7, 1.5, "Monte Carlo\nFragility Update",
+        "Re-runs n=12,000 samples with\nupdated material posteriors", "#FAD7A0")
+    box(7.3, 2.9, 2.7, 1.5, "FEM / DEM\nFull-Building Model",
+        "3D solid FEM or DEM for\ncritical buildings (HPC nodes)", "#FAD7A0")
+    box(7.3, 1.2, 2.7, 1.3, "Multi-hazard AFP\nForecast Engine",
+        "Convolves updated fragility with\n48-hr storm hazard forecast", "#FAD7A0")
+
+    # Column 4: Output
+    ax.text(11.5, 6.65, "OPERATOR OUTPUTS", ha="center", va="center",
+            fontsize=9, color="#555", fontweight="bold")
+    box(10.15, 4.8, 2.7, 1.3, "Risk Dashboard",
+        "AFP / outage risk per building;\nupdates every 15 min pre-storm", "#FDEDEC")
+    box(10.15, 3.1, 2.7, 1.3, "Maintenance\nPriority Alerts",
+        "Flags degraded buildings;\npre-positions repair crews", "#FDEDEC")
+    box(10.15, 1.4, 2.7, 1.3, "Grid Dispatch\nAdvisory",
+        "Expected capacity at risk;\nfeeds EMS/SCADA for dispatch", "#FDEDEC")
+
+    # Arrows: sensors → ingestion
+    for sy in [6.08, 4.98, 3.88, 2.78, 1.68]:
+        arrow(2.85, sy, 3.7, 5.6)
+
+    # Arrows: ingestion chain
+    arrow(5.05, 5.1, 5.05, 4.7)
+    arrow(5.05, 3.5, 5.05, 2.9)  # state → hazard ingestion (parallel)
+    arrow(5.05, 3.5, 7.3, 5.45)  # state → fragility update
+    arrow(5.05, 1.9, 7.3, 1.85)  # hazard → AFP engine
+
+    # Arrows: HPC chain
+    arrow(8.65, 4.7, 8.65, 4.4)
+    arrow(8.65, 2.9, 8.65, 2.5)
+    arrow(8.65, 4.7, 8.65, 2.9)
+    arrow(9.15, 3.85, 10.15, 5.45)   # fragility → dashboard
+    arrow(9.15, 3.85, 10.15, 3.75)   # fragility → maintenance
+    arrow(8.65, 1.2, 10.15, 2.05)    # AFP engine → grid dispatch
+
+    # Phase labels
+    phase_info = [
+        (1.5,  "#85C1E9", "Phase 0 — Sensing"),
+        (5.05, "#58D68D", "Phase 1 — Estimation"),
+        (8.65, "#F0B27A", "Phase 2 — HPC Physics"),
+        (11.5, "#F1948A", "Phase 3 — Decision"),
+    ]
+    for px, col, lbl in phase_info:
+        ax.add_patch(FancyBboxPatch((px - 1.35, 0.05), 2.7, 0.45,
+                     boxstyle="round,pad=0.05", facecolor=col,
+                     edgecolor="none", alpha=0.6))
+        ax.text(px, 0.28, lbl, ha="center", va="center", fontsize=8,
+                fontweight="bold", color="#222")
+
+    ax.set_title(
+        "HPC4EI Digital Twin — Conceptual Data-Flow Architecture\n"
+        "Pre-1950 URM Thermal Power Plant Multi-Hazard Risk Framework",
+        fontsize=11, pad=8,
+    )
+    fig.text(
+        0.01, -0.02,
+        "CCTV cameras support post-event rapid assessment and routine AI crack detection "
+        "(surface-only; not reliable during storm due to rain/debris obscuration). "
+        "Accelerometers provide continuous pre-storm stiffness monitoring via operational modal analysis (OMA); "
+        "they inform Bayesian updating of material parameters in the fragility model. "
+        "The HPC physics engine (Phase 2) is the scope of the HPC4EI proposal; "
+        "Phases 0–1 and 3 leverage existing SCADA infrastructure.",
+        fontsize=7.5, color="#555",
+    )
+    save(fig, "digital_twin_schematic.png")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -743,6 +1046,15 @@ def main():
     print("Building HPC scaling argument (Figs 12–13)...")
     hpc_results = run_hpc_scaling()
     plot_hpc_scaling(hpc_results)
+
+    print("Computing grid consequence model (Fig 14)...")
+    plot_consequence_model(afp)
+
+    print("Computing AFP epistemic uncertainty (Fig 15)...")
+    plot_afp_uncertainty(results)
+
+    print("Generating digital twin schematic (Fig 16)...")
+    plot_digital_twin_schematic()
 
     print("\n── Summary: Annual failure probabilities (%) [Generic] ──")
     cols = ["Hurricane", "Tornado", "100-yr Flood", "Combined Hurricane"]
