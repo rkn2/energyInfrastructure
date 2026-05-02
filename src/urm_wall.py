@@ -1,17 +1,13 @@
 """
-URM wall panel geometry and material properties for pre-1950 industrial buildings.
+URM wall panel geometry and material properties for pre-1950 thermal power plant buildings.
 
-Archetypes represent the three dominant structural configurations found in pre-1950
-URM industrial campuses (heavy industrial, large-span production hall, multi-story
-complex). Geometry and material parameters are derived from survey data on U.S. thermal
-generation fleet buildings — the best-documented pre-1950 industrial URM dataset
-available — but the structural behavior is representative of any heavy manufacturing
-facility of the era (foundries, mills, chemical plants, fabrication shops).
+Archetypes represent the three dominant structural configurations of U.S. steam-generation
+campuses built 1890–1950: boiler house (multi-story, short panels), turbine hall
+(tall open-span, most vulnerable), and powerhouse (intermediate height/span).
+Parameters derived from survey data on the U.S. thermal generation fleet.
 
-NOTE FOR STEAM PLANT VARIANT (future DOE CESER / GMI application):
-  - Restore archetype labels to 'Boiler House (1895-1915)', 'Turbine Hall (1920-1940)',
-    'Powerhouse (1910-1930)' and update consequence model to use MWh / wholesale rate.
-  - See admin/grants/ for CESER and GMI concept paper templates.
+Branch: topic2-steam-plant — DOE HPC4EI Topic 2 (ITO) energy infrastructure variant.
+For the Topic 1 (AMMTO) manufacturing variant, see main branch.
 
 All units: inches/psi for material props; feet/lbf for structural calculations.
 """
@@ -19,14 +15,10 @@ import numpy as np
 
 
 # ── Archetype definitions ──────────────────────────────────────────────────────
-# Three representative pre-1950 URM industrial building configurations.
-# Internal keys retain thermal-plant names (boiler_house, turbine_hall, powerhouse)
-# for code stability; display labels are generic manufacturing terms.
-# STEAM PLANT VARIANT: swap labels back to 'Boiler House', 'Turbine Hall', 'Powerhouse'.
-
+# Three representative building types from U.S. thermal generation fleet (steam plant branch).
 ARCHETYPES = {
     "boiler_house": {
-        "label": "Heavy Industrial\n(1895–1915)",
+        "label": "Boiler House\n(1895–1915)",
         "thickness_in_mean": 24.0,   # 6-wythe solid brick
         "thickness_in_std": 2.0,
         "height_ft_mean": 30.0,      # total building wall height ~28-32 ft
@@ -50,7 +42,7 @@ ARCHETYPES = {
         "unit_weight_pcf": 120.0,
     },
     "turbine_hall": {
-        "label": "Large Production Hall\n(1920–1940)",
+        "label": "Turbine Hall\n(1920–1940)",
         "thickness_in_mean": 16.0,   # 4-wythe
         "thickness_in_std": 1.5,
         "height_ft_mean": 45.0,      # total height — open to roof, no intermediate floors
@@ -72,7 +64,7 @@ ARCHETYPES = {
         "unit_weight_pcf": 120.0,
     },
     "powerhouse": {
-        "label": "Multi-story Industrial\n(1910–1930)",
+        "label": "Powerhouse\n(1910–1930)",
         "thickness_in_mean": 20.0,   # 5-wythe
         "thickness_in_std": 2.0,
         "height_ft_mean": 36.0,

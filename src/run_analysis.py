@@ -100,7 +100,7 @@ def plot_hurricane_fragility(results: dict):
 
     ax.set_xlabel("3-second Gust Wind Speed (mph)")
     ax.set_ylabel("P(Wall Panel Failure)")
-    ax.set_title("Hurricane Wind Fragility — Pre-1950 URM Industrial Building Walls")
+    ax.set_title("Hurricane Wind Fragility — URM Thermal Power Plant Walls")
     ax.set_xlim(60, 200)
     ax.set_ylim(0, 1.05)
     ax.legend(loc="upper left", frameon=False)
@@ -135,7 +135,7 @@ def plot_tornado_fragility(results: dict):
         for j, lbl in enumerate(EF_LABELS)
     ])
     ax.set_ylabel("P(Wall Panel Failure)")
-    ax.set_title("Tornado Fragility by EF Category — Pre-1950 URM Industrial Building Walls")
+    ax.set_title("Tornado Fragility by EF Category — URM Thermal Power Plant Walls")
     ax.set_ylim(0, 1.05)
     ax.legend(loc="upper left", frameon=False)
     # 10% and 50% lines
@@ -173,7 +173,7 @@ def plot_flood_fragility(results: dict):
 
     ax.set_xlabel("Flood Inundation Depth (ft)")
     ax.set_ylabel("P(Wall Panel Failure)")
-    ax.set_title("Flood Fragility — Pre-1950 URM Industrial Building Walls")
+    ax.set_title("Flood Fragility — URM Thermal Power Plant Walls")
     ax.set_xlim(0, 16)
     ax.set_ylim(0, 1.10)
     ax.legend(loc="upper left", frameon=False)
@@ -208,7 +208,7 @@ def plot_combined_fragility(results: dict):
         ax_left.axhline(p_ref, color="#888", lw=0.7, ls=":")
     ax_left.set_xlabel("3-second Gust Wind Speed (mph)")
     ax_left.set_ylabel("P(Wall Panel Failure)")
-    ax_left.set_title("Large Production Hall: Wind-only vs. Combined Loading")
+    ax_left.set_title("Turbine Hall: Wind-only vs. Combined Loading")
     ax_left.set_xlim(60, 200)
     ax_left.set_ylim(0, 1.05)
     ax_left.legend(frameon=False)
@@ -321,7 +321,7 @@ def plot_risk_matrix(results: dict):
     ax.set_yticklabels(arch_labels, fontsize=10)
     ax.set_ylabel("Building Archetype", fontsize=11)
     ax.set_title("Estimated Annual Wall Failure Probability (%) — "
-                 "Pre-1950 URM Industrial Manufacturing Facilities", fontsize=11)
+                 "Legacy URM Thermal Generation Facilities", fontsize=11)
 
     # Annotate each cell
     for i in range(len(ARCHETYPES)):
@@ -408,7 +408,7 @@ def plot_degradation_sensitivity():
 
     ax.set_xlabel("3-second Gust Wind Speed (mph)")
     ax.set_ylabel("P(Wall Panel Failure)")
-    ax.set_title("Effect of Building Age on Large Production Hall Hurricane Fragility")
+    ax.set_title("Effect of Building Age on Turbine Hall Hurricane Fragility")
     ax.set_xlim(60, 200)
     ax.set_ylim(0, 1.05)
     ax.legend(loc="upper left", frameon=False, fontsize=9)
@@ -432,38 +432,26 @@ def plot_consequence_model(afp: np.ndarray):
     Expected Annual Energy Loss (MWh). afp is (3,5) from plot_risk_matrix;
     column 4 is the multi-hazard union AFP.
     """
-    # Post-structural-failure restoration days per building type.
-    # Based on industrial facility post-storm recovery data (EPRI TR-1026889 2012;
-    # FEMA 489 2005 post-Katrina industrial facility assessments).
-    # STEAM PLANT VARIANT: restore comments to "boiler/pressure-vessel inspection",
-    # "turbine alignment", etc. and replace DAILY_PRODUCTION_VALUE with
-    # UNIT_CAPACITY_MW=200 and WHOLESALE_RATE_PER_MWH=45.0.
+    # Post-storm restoration days for steam generation units.
+    # Source: EIA-860 post-Katrina coal unit outage records; EPRI TR-1026889 (2012).
     RESTORATION_DAYS = {
-        "boiler_house": 30,   # heavy equipment inspection + structural repair (large-span roof)
-        "turbine_hall": 45,   # production equipment re-alignment + large-span structural repair
-        "powerhouse":   21,   # targeted structural repair + equipment inspection
+        "boiler_house": 30,   # boiler/pressure-vessel inspection + refractory repair
+        "turbine_hall": 45,   # turbine alignment + steam path inspection
+        "powerhouse":   21,   # lower-voltage switchgear + simpler restart protocol
     }
-
-    # Daily production value: representative SMM manufacturing revenue.
-    # Replace with SMM-provided actual value for the full application.
-    # Basis: US Census Bureau Annual Survey of Manufactures — SMM (50–499 employees)
-    # average value of shipments ~$20M–$80M/yr → $55k–$220k/day.
-    DAILY_PRODUCTION_VALUE = {
-        "boiler_house": 80_000,   # heavy industrial: $80k/day (capital-intensive, lower throughput)
-        "turbine_hall": 150_000,  # large production hall: $150k/day (high-volume, large floor area)
-        "powerhouse":   100_000,  # multi-story: $100k/day (mixed operations)
-    }
+    UNIT_CAPACITY_MW    = 200    # representative pre-1950 steam unit (EIA-860)
+    WHOLESALE_RATE_PER_MWH = 45.0  # $/MWh, MISO/SERC average 2023 (EIA 861)
 
     arch_keys   = list(ARCHETYPES.keys())
     arch_labels = [ARCHETYPES[k]["label"] for k in arch_keys]
     rest_days   = np.array([RESTORATION_DAYS[k] for k in arch_keys], dtype=float)
-    daily_val   = np.array([DAILY_PRODUCTION_VALUE[k] for k in arch_keys], dtype=float)
 
     union_afp_frac = afp[:, 4] / 100.0
-    eaod     = union_afp_frac * rest_days               # expected annual outage days
-    eal_usd  = eaod * daily_val / 1e6                   # expected annual production loss ($M)
+    eaod    = union_afp_frac * rest_days
+    eal_mwh = eaod * 24.0 * UNIT_CAPACITY_MW
+    eal_m_usd = eal_mwh * WHOLESALE_RATE_PER_MWH / 1e6
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.2))
     palette = [COLORS[k] for k in arch_keys]
 
     def _bar(ax, vals, ylabel, title, fmt):
@@ -474,27 +462,29 @@ def plot_consequence_model(afp: np.ndarray):
             ax.text(bar.get_x() + bar.get_width() / 2, v * 1.04,
                     fmt.format(v), ha="center", va="bottom", fontsize=9)
 
-    _bar(axes[0], eaod,    "Expected Annual Production Outage (days)",
-         "Expected Annual\nProduction Outage Days", "{:.2f} d")
-    _bar(axes[1], eal_usd, "Expected Annual Production Loss ($M)",
-         "Expected Annual\nProduction Loss ($M)", "${:.2f}M")
+    _bar(axes[0], eaod,         "Expected Annual Outage (days)",
+         "Expected Annual\nOutage Days", "{:.2f} d")
+    _bar(axes[1], eal_mwh / 1e3, "Expected Annual Energy Loss (GWh)",
+         f"Expected Annual\nEnergy Loss ({UNIT_CAPACITY_MW} MW unit)", "{:.1f} GWh")
+    _bar(axes[2], eal_m_usd,    "Expected Annual Revenue Loss ($M)",
+         f"Expected Annual\nRevenue Loss (@${WHOLESALE_RATE_PER_MWH}/MWh)", "${:.2f}M")
 
     fig.suptitle(
-        "Manufacturing Consequence Model — Annual Production Loss from Multi-Hazard URM Failure",
+        "Grid Consequence Model — Annual Energy and Revenue Risk from Multi-Hazard URM Failure",
         fontsize=11, y=1.02,
     )
     fig.text(
-        0.01, -0.05,
-        "Multi-hazard AFP: 1−(1−AFP_hurricane)(1−AFP_tornado)(1−0.5·AFP_flood). "
-        "Restoration days: EPRI TR-1026889 (2012) industrial facility post-storm recovery; FEMA 489 (2005). "
-        "Daily production values: US Census Bureau Annual Survey of Manufactures, SMM (50–499 employees) "
-        "representative range $55k–$220k/day. Replace with SMM-provided actuals for full application. "
-        "Does not include supply chain disruption, contract penalties, or equipment replacement costs.",
+        0.01, -0.04,
+        f"Multi-hazard AFP: 1−(1−AFP_hurricane)(1−AFP_tornado)(1−0.5·AFP_flood). "
+        f"Restoration times: EIA-860 post-Katrina (2005); EPRI TR-1026889 (2012). "
+        f"Unit capacity {UNIT_CAPACITY_MW} MW representative pre-1950 steam plant. "
+        f"Actual Victor J. Daniel Jr. capacity: 1,252 MW — scale accordingly. "
+        f"Does not include cascading grid reliability impact.",
         fontsize=7.5, color="#555",
     )
     save(fig, "consequence_model.png")
-    return {"eaod": eaod, "eal_usd": eal_usd,
-            "restoration_days": rest_days, "daily_production_value": daily_val}
+    return {"eaod": eaod, "eal_mwh": eal_mwh, "eal_m_usd": eal_m_usd,
+            "restoration_days": rest_days, "unit_mw": UNIT_CAPACITY_MW}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -576,7 +566,7 @@ def plot_afp_uncertainty(results: dict):
 
     ax.set_xlabel("ΔAFP (percentage points) relative to base case")
     ax.set_title(
-        f"AFP Sensitivity to Epistemic Uncertainty — Large Production Hall Hurricane\n"
+        f"AFP Sensitivity to Epistemic Uncertainty — Turbine Hall Hurricane\n"
         f"Base AFP = {afp_base:.2f}%  |  Range: [{ci_lo:.2f}%, {ci_hi:.2f}%]  "
         f"(~{ci_hi/ci_lo:.1f}× spread from parameter uncertainty alone)"
     )
@@ -709,7 +699,7 @@ def plot_digital_twin_schematic():
 
     ax.set_title(
         "HPC4EI Digital Twin — Conceptual Data-Flow Architecture\n"
-        "Pre-1950 URM Industrial Manufacturing Facility Multi-Hazard Risk Framework",
+        "Pre-1950 URM Thermal Power Plant Multi-Hazard Risk Framework",
         fontsize=11, pad=8,
     )
     fig.text(
@@ -767,7 +757,7 @@ def plot_fe_comparison(fe_results: dict, baseline_results: dict):
 
     ax.set_xlabel("3-second Gust Wind Speed (mph)")
     ax.set_ylabel("P(Wall Panel Failure)")
-    ax.set_title(f"FE Boundary Condition Comparison — Large Production Hall Hurricane Fragility")
+    ax.set_title(f"FE Boundary Condition Comparison — Turbine Hall Hurricane Fragility")
     ax.set_xlim(60, 200)
     ax.set_ylim(0, 1.05)
     ax.legend(loc="upper left", frameon=False, fontsize=8)
@@ -806,7 +796,7 @@ def plot_fe_comparison(fe_results: dict, baseline_results: dict):
                    height=0.5, edgecolor="white")
     ax.set_xscale("log")
     ax.set_xlabel("Annual Failure Probability (%,  log scale)")
-    ax.set_title("Hurricane AFP by Model Type — Large Production Hall")
+    ax.set_title("Hurricane AFP by Model Type — Turbine Hall")
     for bar, val in zip(bars, afp_pct[::-1]):
         ax.text(val * 1.25, bar.get_y() + bar.get_height() / 2,
                 f"{val:.2f}%", va="center", fontsize=9)
@@ -853,7 +843,7 @@ def plot_fe_comparison(fe_results: dict, baseline_results: dict):
             cell.set_text_props(color="white", fontweight="bold")
             cell.set_facecolor("#2471A3")
 
-    ax.set_title(f"D/C Ratios and AFP at 150-mph Design Wind — Large Production Hall  |  Method: {method}",
+    ax.set_title(f"D/C Ratios and AFP at 150-mph Design Wind — Turbine Hall  |  Method: {method}",
                  fontsize=10, pad=12)
     save(fig, "fe_dc_ratio_table.png")
 
@@ -1101,7 +1091,7 @@ def plot_hurdat2_validation(hurdat2: dict, fragility_results: dict):
                  f"{v:.2f}%", ha="center", va="bottom", fontsize=10, fontweight="bold")
 
     ax2.set_ylabel("Annual Hurricane Failure Probability (%)")
-    ax2.set_title("Large Production Hall Hurricane AFP\nby Hazard Data Source")
+    ax2.set_title("Turbine Hall Hurricane AFP\nby Hazard Data Source")
     ax2.set_ylim(0, max(values) * 1.35)
 
     comp = hurdat2.get("asce_comparison", {})

@@ -36,8 +36,8 @@ from fragility import (
 from scipy.interpolate import interp1d
 
 # ── Site identity ──────────────────────────────────────────────────────────────
-SITE_NAME = "Gulf Coast Industrial Site (illustrative; Plant Daniel vicinity)"
-SITE_CITY = "Escatawpa, MS"
+SITE_NAME = "Victor J. Daniel Jr. Power Plant vicinity"
+SITE_CITY = "Escatawpa, MS"   # Jackson County; corrected from prior Gulfport/Harrison County
 SITE_LAT  = 30.35
 SITE_LON  = -88.87
 
