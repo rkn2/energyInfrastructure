@@ -1,9 +1,9 @@
 """
 Fragility curve generation for URM thermal plant building wall assemblies.
-Uses vectorized Monte Carlo (Latin Hypercube-inspired stratified sampling).
+Uses vectorized Monte Carlo with independent parameter sampling.
 
 Hazards:
-    wind_hurricane  — 3-s gust V (mph), 80–200 mph
+    wind_hurricane  — 3-s gust V (mph), 60–200 mph
     wind_tornado    — EF-scale peak gust mapped through EF_MID_SPEEDS
     flood           — inundation depth h (ft), 0–16 ft
 

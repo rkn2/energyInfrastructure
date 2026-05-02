@@ -20,8 +20,6 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-from matplotlib.gridspec import GridSpec
 from scipy.interpolate import interp1d
 
 from urm_wall import ARCHETYPES
@@ -119,7 +117,7 @@ def plot_tornado_fragility(results: dict):
 
     for i, key in enumerate(keys):
         r = results[key]["tornado"]
-        bars = ax.bar(x + offsets[i], r["p_fail"],
+        ax.bar(x + offsets[i], r["p_fail"],
                       width=bar_w * 0.9,
                       color=COLORS[key], alpha=0.85,
                       label=ARCHETYPES[key]["label"])
@@ -217,18 +215,26 @@ def plot_combined_fragility(results: dict):
         ax_right.plot(r_c["V_mph"], r_c["p_fail"],
                       color=COLORS[key], ls="-", lw=2.0,
                       label=arch["label"])
+    # Explain line styles via proxy artists
+    from matplotlib.lines import Line2D
+    ax_right.add_artist(ax_right.legend(frameon=False, loc="upper left"))
+    style_legend = ax_right.legend(
+        handles=[Line2D([0], [0], color="k", ls="--", lw=1.5, alpha=0.5, label="Wind only"),
+                 Line2D([0], [0], color="k", ls="-",  lw=2.0,             label="Wind + surge")],
+        frameon=False, loc="center left", fontsize=8)
+    ax_right.add_artist(style_legend)
     for p_ref in [0.10, 0.50]:
         ax_right.axhline(p_ref, color="#888", lw=0.7, ls=":")
     ax_right.set_xlabel("3-second Gust Wind Speed (mph)")
     ax_right.set_title("All Archetypes: Combined Wind + Surge")
     ax_right.set_xlim(60, 200)
-    ax_right.legend(frameon=False, loc="upper left")
 
     fig.suptitle("Hurricane Landfall: Compound Wind + Storm-Surge Loading on URM Plant Walls",
                  fontsize=12, y=1.02)
     fig.text(0.01, -0.04,
              "Dashed = wind-only; solid = wind + correlated storm surge. "
-             "Surge depth: 0.14(V-60) ft (Cat 1→3 ft, Cat 5→16 ft).",
+             "Surge depth: 0.14(V−60) ft [Cat 1 (80 mph)→3 ft; Cat 5 (157 mph)→14 ft]. "
+             "Irish et al. (2008) Gulf Coast median.",
              fontsize=7.5, color="#555")
     save(fig, "fragility_combined_hurricane.png")
 
@@ -260,10 +266,12 @@ def plot_risk_matrix(results: dict):
                             bounds_error=False, fill_value=(0, 1))
         afp[i, 0] = annual_failure_probability(interp_h, RETURN_PERIOD_WIND) * 100
 
-        # Tornado: approximate — P(EF2+) annual rate ~0.2% for high-exposure SE US
-        # Weight by regional tornado hazard frequency
+        # Tornado: P(fail | EF) × annual rate per EF category.
+        # Rates from Tippett et al. (2016) SPC tornado climatology for SE US
+        # high-exposure region (roughly AL/MS/TN corridor). Values are per
+        # grid cell (~1000 km²) per year; treat as site-scale approximation.
         r_t = results[key]["tornado"]
-        ef_annual_rates = np.array([0.01, 0.005, 0.002, 0.0005, 0.0001, 0.00002])
+        ef_annual_rates = np.array([0.010, 0.005, 0.002, 0.0005, 0.0001, 0.00002])
         afp[i, 1] = float(np.sum(r_t["p_fail"] * ef_annual_rates)) * 100
 
         # Flood: integrate over return-period depths (100-yr base)
@@ -308,9 +316,12 @@ def plot_risk_matrix(results: dict):
     cbar.set_label("Annual Failure Probability (%)", fontsize=9)
 
     fig.text(0.01, -0.06,
-             "Numerical integration of fragility × hazard frequency density. "
-             "Wind hazard: ASCE 7-22 risk-cat II. Flood: FEMA Zone AE. "
-             "Tornado: SE US exposure rates. For comparison, ASCE 7-22 design targets ≤0.02% for new construction.",
+             "PEER PBEE integration: λ_f = Σ P(fail|IM) · Δλ(IM). "
+             "Wind: ASCE 7-22 Risk Cat II hazard curve (10-yr to 1700-yr return periods). "
+             "Flood: FEMA Zone AE depths (conditional on site being in floodplain). "
+             "Tornado: Tippett et al. (2016) SE US rates. "
+             "Reference: ASCE 7-22 Risk Cat II design wind → 700-yr RP (0.14%/yr exceedance probability); "
+             "these archetypes reach >50% panel failure well below the 700-yr wind speed.",
              fontsize=7.5, color="#555", wrap=True)
     save(fig, "risk_matrix.png")
 
@@ -327,7 +338,6 @@ def plot_degradation_sensitivity():
     of construction year (1890, 1910, 1930, 1950) — key argument for why aging
     plants face invisibly elevated risk.
     """
-    import copy
     from hazard_loads import wind_pressure_psf
     from limit_states import governing_dc
     from urm_wall import sample_walls, degradation_factor

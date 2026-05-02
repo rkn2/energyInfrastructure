@@ -4,7 +4,6 @@ Archetypes: boiler house, turbine hall, powerhouse (1890-1950 era construction).
 All units: inches/psi for material props; feet/lbf for structural calculations.
 """
 import numpy as np
-from dataclasses import dataclass, field
 
 
 # ── Archetype definitions ──────────────────────────────────────────────────────
@@ -96,9 +95,22 @@ def degradation_factor(year_built: int, scatter: float = 0.0) -> float:
 
 # ── Vectorised property sampler ────────────────────────────────────────────────
 
+def _ln_params(mean: float, cov: float) -> tuple:
+    """
+    Convert (mean, CoV) to lognormal (mu_ln, sigma_ln) so that
+    E[X] = mean and Std[X]/E[X] = CoV exactly.
+    numpy's lognormal(mu, sigma) draws X where ln(X)~N(mu, sigma²),
+    so E[X] = exp(mu + sigma²/2). Passing CoV directly as sigma biases
+    the mean by exp(CoV²/2) — ~13% for CoV=0.50.
+    """
+    sigma = np.sqrt(np.log(1.0 + cov**2))
+    mu    = np.log(mean) - sigma**2 / 2.0
+    return mu, sigma
+
+
 def sample_walls(archetype: dict, n: int, seed: int = 42) -> dict:
     """
-    Draw n correlated Monte Carlo samples of wall properties.
+    Draw n independent Monte Carlo samples of wall properties.
     Returns a dict of 1-D numpy arrays, one entry per sample.
     """
     rng = np.random.default_rng(seed)
@@ -112,15 +124,17 @@ def sample_walls(archetype: dict, n: int, seed: int = 42) -> dict:
     ph_ft = rng.normal(archetype["panel_height_ft_mean"],
                        archetype["panel_height_ft_std"], n).clip(6.0, 40.0)
 
-    # Material properties: lognormal (always positive, right-skewed)
-    f_m = rng.lognormal(np.log(archetype["f_m_mean_psi"]),
-                        archetype["f_m_cov"], n)
-    f_v = rng.lognormal(np.log(archetype["f_v_mean_psi"]),
-                        archetype["f_v_cov"], n)
-    # Modulus of rupture: sampled independently (primary control is mortar quality,
-    # not brick strength). TMS 402 values for clay units; degraded per archetype era.
-    f_r = rng.lognormal(np.log(archetype["f_r_mean_psi"]),
-                        archetype["f_r_cov"], n).clip(5.0, 150.0)
+    # Material properties: lognormal with exact target mean and CoV.
+    # Using proper (mu_ln, sigma_ln) parameterization — see _ln_params().
+    mu_fm, sig_fm = _ln_params(archetype["f_m_mean_psi"], archetype["f_m_cov"])
+    mu_fv, sig_fv = _ln_params(archetype["f_v_mean_psi"], archetype["f_v_cov"])
+    mu_fr, sig_fr = _ln_params(archetype["f_r_mean_psi"], archetype["f_r_cov"])
+
+    f_m = rng.lognormal(mu_fm, sig_fm, n)
+    f_v = rng.lognormal(mu_fv, sig_fv, n)
+    # Modulus of rupture sampled independently: primary control is mortar quality,
+    # not brick compressive strength (TMS 402 values for clay units).
+    f_r = rng.lognormal(mu_fr, sig_fr, n).clip(5.0, 150.0)
 
     # Degradation: Gaussian scatter around deterministic mean
     deg_mean = degradation_factor(archetype["year_built"])
